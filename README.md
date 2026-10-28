@@ -15,9 +15,10 @@ The directory must be an absolute path, because devbox runs scripts from this re
 1. copies go-template with `gonew`, rewriting the module path in `go.mod` and every import;
 2. for a command, renames `cmd/app` to `cmd/<name>`; otherwise removes `cmd/` and adds a root `doc.go`, its package named for the module without a `go-` prefix;
 3. writes a README skeleton for the kind, and removes the licence, so you choose one;
-4. generates `.golangci.yml`, which records the module kind, `BASELINE.md` and the CI workflow for the new module;
-5. runs `devbox run check`;
-6. creates a git repo on `main` with one commit.
+4. upgrades go-baseline to its latest release, so a project never starts on an old baseline;
+5. generates `.golangci.yml`, which records the module kind, `BASELINE.md` and the CI workflow for the new module;
+6. runs `devbox run check`;
+7. creates a git repo on `main` with one commit.
 
 Publish it with `github publish` from repo-tools.
 

@@ -100,6 +100,10 @@ This is a \`$kind\` module. \`go tool go-baseline map\` lists each package's rol
 EOF
 	;;
 esac
+# Start on the latest go-baseline, not the version go-template pins. Ask
+# GitHub directly: the module proxy caches @latest, so it can lag a release.
+GOPROXY=direct go get -tool github.com/ianflanagan1/go-baseline/cmd/go-baseline@latest
+go mod tidy
 go tool go-baseline write -kind "$kind"
 devbox run check
 git init --quiet --initial-branch=main
