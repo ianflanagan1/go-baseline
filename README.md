@@ -4,19 +4,20 @@ The settings every Go project shares, and the command that keeps a project on th
 
 ## Starting a project
 
-From this repo:
+From this repo, with the module kind: `command`, `pure-library` (no I/O; every package is core) or `adapters` (shared adapters, such as go-adapters):
 
 ```sh
-devbox run new github.com/ianflanagan1/<name> ~/projects-ianf/<category>/<name>
+devbox run new <kind> github.com/ianflanagan1/<name> ~/projects-ianf/<category>/<name>
 ```
 
 The directory must be an absolute path, because devbox runs scripts from this repo's root. The script:
 
 1. copies go-template with `gonew`, rewriting the module path in `go.mod` and every import;
-2. renames `cmd/app` to `cmd/<name>`, replaces the README and removes the licence, so you choose one;
-3. generates `.golangci.yml` for the new module path;
-4. runs `devbox run check`;
-5. creates a git repo on `main` with one commit.
+2. for a command, renames `cmd/app` to `cmd/<name>`; otherwise removes `cmd/` and adds a root `doc.go`, its package named for the module without a `go-` prefix;
+3. writes a README skeleton for the kind, and removes the licence, so you choose one;
+4. generates `.golangci.yml`, which records the module kind, `BASELINE.md` and the CI workflow for the new module;
+5. runs `devbox run check`;
+6. creates a git repo on `main` with one commit.
 
 Publish it with `github publish` from repo-tools.
 
@@ -25,29 +26,38 @@ Publish it with `github publish` from repo-tools.
 | Setting | Where | Checked by |
 |---|---|---|
 | golangci-lint config, generated from the module path in `go.mod` | `.golangci.yml` | `verify`: must match byte for byte |
+| CI: `devbox run check` on each push and pull request | `.github/workflows/check.yml` | `verify`: must match byte for byte |
+| The architecture and conventions, with examples, for people and AI agents | `BASELINE.md`, imported by the project's `CLAUDE.md` | `verify`: must match byte for byte |
 | Go pinned to an exact version, golangci-lint pinned to the baseline's version | `devbox.json` packages | `verify` |
 | `GOTOOLCHAIN=local` | `devbox.json` env | `verify` |
-| `lint` and `check` scripts, and a `test` script | `devbox.json` scripts | `verify` |
+| `lint`, `test`, `integration` and `check` scripts | `devbox.json` scripts | `verify` |
+| Values reaching the core through interfaces, functions, fields or type arguments are pure (`coreboundary`) | code | `verify` |
+| Configuration (environment, flags, `os.Args`) is read only in `cmd/` (`configread`) | code | `verify` |
+| No third-party dependency of a core or shell package imports an I/O package, at any depth | `go.mod` | `verify`, from `go list -deps` |
+| Each core package's tests cover at least 80% of its statements | tests | `test` |
 | No `src/` or `pkg/` at the root, no `util`, `common` or `helpers` package | directories | `verify` |
 
-`devbox run check` runs `go tool go-baseline verify`, then the linters, then the tests.
+`devbox run check` runs `go tool go-baseline verify`, then the linters, then `go tool go-baseline test`.
 
 ## The layout the linters enforce
 
-| Directory | Role | May import |
-|---|---|---|
-| `internal/core/...` | Functional core: pure functions over values | Other core packages, pure standard library packages, third-party libraries |
-| `internal/adapters/...` | Adapters for databases, HTTP, files, the clock and so on | Anything |
-| `cmd/<name>` | Composition root: builds adapters and passes them in | Anything |
-| Everything else | The shell: reaches outside dependencies only through ports (interfaces) | Anything except adapters and I/O packages |
+[BASELINE.md](BASELINE.md) sets out the roles (core, shell, adapter, composition root), the rules for each and examples. Its source is `internal/core/baseline/BASELINE.md`. A package's directory decides its role: `RoleOf` in `baseline.go` and the paths in the golangci-lint template must agree. The analyzers use `RoleOf` too. depguard enforces the import rules; forbidigo bans the clock, printing and the global loggers outside `cmd/` and adapters; gocyclo, gocognit and funlen keep adapters thin and `cmd/` small. Test files are exempt from both, so integration tests can use real dependencies. The other linters cover the Go guide: exhaustive switches (`exhaustive`, `gochecksumtype`), no package-level state (`gochecknoglobals`, `gochecknoinits`), doc comments on exported names (`revive`), `errors.Is` and `errors.As` (`errorlint`) and `package foo_test` tests (`testpackage`).
 
-depguard enforces the import rules, and forbidigo bans the clock functions (`time.Now` and so on) outside `cmd/` and adapters. Test files are exempt from both, so integration tests can use real dependencies. The other linters cover the Go guide: exhaustive switches (`exhaustive`, `gochecksumtype`), no package-level state (`gochecknoglobals`, `gochecknoinits`), doc comments on exported names (`revive`), `errors.Is` and `errors.As` (`errorlint`) and `package foo_test` tests (`testpackage`).
+## Adding an architecture rule
+
+Rules that need a project's roles or type information across packages are analyzers, built on `golang.org/x/tools/go/analysis`, in `internal/core/analyzers`. To add one:
+
+1. Write a function that returns an `*analysis.Analyzer` for an `analyzers.Project`, and add it to `All`.
+2. Add sample code to `internal/core/analyzers/testdata/src`, marking each line that should be reported with a ``// want `regexp` `` comment, and test it with `analysistest.Run`.
+3. Describe the rule in `BASELINE.md`, so agents meet it before the analyzer does.
+
+`verify` runs every analyzer over the project, through the adapter in `internal/adapters/gopackages`.
 
 golangci-lint can't extend a shared config, so a project can't add its own rules to `.golangci.yml`. When one needs to, add the option to the baseline.
 
 ## Changing a shared setting
 
-1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, or the constants in `baseline.go`. When bumping golangci-lint, change `GolangciLintVersion` and the version in this repo's `devbox.json` together.
+1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, or the constants in `baseline.go`. To let the core and shell use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint, change `GolangciLintVersion` and the version in this repo's `devbox.json` together.
 2. `devbox run check`, commit, then `github release . minor`.
 3. In go-template and each project:
 
@@ -63,5 +73,7 @@ golangci-lint can't extend a shared config, so a project can't add its own rules
 
 | Command | What it does |
 |---|---|
-| `go tool go-baseline write` | Writes `.golangci.yml` for the module in `go.mod` |
-| `go tool go-baseline verify` | Lists each way the project differs from the baseline, and fails if there are any |
+| `go tool go-baseline write [-kind <kind>]` | Writes `.golangci.yml` for the module in `go.mod` and the module kind (by default, the kind it already records), `BASELINE.md` and `.github/workflows/check.yml` |
+| `go tool go-baseline verify` | Lists each way the project differs from the baseline, including I/O dependencies of the core and shell and the analyzers' findings, and fails if there are any |
+| `go tool go-baseline test` | Runs the tests with coverage, and fails if a core package is below 80% |
+| `go tool go-baseline map` | Lists each package's role, the ports the shell declares and the adapters that implement them |

@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -22,23 +25,184 @@ const GolangciLintVersion = "2.15.0"
 // LintScript is the devbox "lint" script every project has.
 const LintScript = "golangci-lint run && golangci-lint fmt --diff"
 
+// TestScript is the devbox "test" script every project has: the tests, then
+// the core's coverage.
+const TestScript = "go tool go-baseline test"
+
+// IntegrationScript is the devbox "integration" script every project has: all
+// the tests, including those behind the integration build tag, which need
+// real outside services.
+const IntegrationScript = "go test -tags integration ./..."
+
 // CheckScript is the devbox "check" script every project has.
 const CheckScript = "go tool go-baseline verify && devbox run lint && devbox run test"
+
+// MinCoreCoverage is the statement coverage, in percent, that each core
+// package's tests must reach.
+const MinCoreCoverage = 80.0
 
 // ErrNoModule is returned when go.mod has no module line.
 var ErrNoModule = errors.New("go.mod has no module line")
 
+// ErrNoKind is returned when .golangci.yml doesn't record the project's kind.
+var ErrNoKind = errors.New(".golangci.yml doesn't record the project's kind; run `go tool go-baseline write -kind command|pure-library|adapters`")
+
 //go:embed golangci.yml.tmpl
 var golangciTemplate string
+
+//go:embed BASELINE.md
+var guide []byte
+
+//go:embed check.yml
+var workflow []byte
+
+// WorkflowPath is where every project has its CI workflow.
+const WorkflowPath = ".github/workflows/check.yml"
+
+var (
+	exactGo      = regexp.MustCompile(`^go@\d+\.\d+\.\d+$`)
+	kindLine     = regexp.MustCompile(`(?m)^# Module kind: ([a-z-]+)\.`)
+	coverageLine = regexp.MustCompile(`^(?:ok|FAIL)?\s+(\S+)\s.*coverage: ([0-9.]+)% of statements`)
+)
+
+// Kind is what a module is for: its module kind. It decides each package's role.
+type Kind string
+
+const (
+	// Command builds programs from cmd/.
+	Command Kind = "command"
+	// PureLibrary is imported by other modules and does no I/O: every
+	// package is core.
+	PureLibrary Kind = "pure-library"
+	// Adapters is imported by other modules' composition roots and adapters:
+	// every package is an adapter.
+	Adapters Kind = "adapters"
+)
+
+// ParseKind returns the Kind named s.
+func ParseKind(s string) (Kind, error) {
+	switch kind := Kind(s); kind {
+	case Command, PureLibrary, Adapters:
+		return kind, nil
+	}
+	return "", fmt.Errorf("unknown kind %q; want command, pure-library or adapters", s)
+}
+
+// KindOf returns the module kind a generated .golangci.yml records.
+func KindOf(golangci []byte) (Kind, error) {
+	match := kindLine.FindSubmatch(golangci)
+	if match == nil {
+		return "", ErrNoKind
+	}
+	return ParseKind(string(match[1]))
+}
+
+// Role is the part a package plays in the architecture. Its path decides it.
+type Role int
+
+const (
+	// Core is the functional core: pure functions over values.
+	Core Role = iota + 1
+	// Shell gathers inputs through ports, calls the core and acts on the
+	// result.
+	Shell
+	// Adapter implements a port by doing I/O.
+	Adapter
+	// Root is a command's composition root, which builds adapters and
+	// passes them in.
+	Root
+)
+
+func (r Role) String() string {
+	switch r {
+	case Core:
+		return "core"
+	case Shell:
+		return "shell"
+	case Adapter:
+		return "adapter"
+	case Root:
+		return "composition root"
+	}
+	return "Role(" + strconv.Itoa(int(r)) + ")"
+}
+
+// RoleOf returns the role of the package in dir, which is slash-separated and
+// relative to the module root ("" for the root). It matches the paths the
+// generated .golangci.yml uses.
+func RoleOf(kind Kind, dir string) Role {
+	switch kind {
+	case PureLibrary:
+		return Core
+	case Adapters:
+		return Adapter
+	case Command:
+	}
+	segments := strings.Split(dir, "/")
+	switch {
+	case slices.Contains(segments, "cmd"):
+		return Root
+	case slices.Contains(segments, "adapters"):
+		return Adapter
+	case strings.Contains("/"+dir+"/", "/internal/core/"):
+		return Core
+	default:
+		return Shell
+	}
+}
+
+// Package is a package as `go list -json` describes it.
+type Package struct {
+	ImportPath string
+	Standard   bool
+	Imports    []string
+	Module     *struct{ Path, Dir string }
+}
+
+// ModuleDirs returns the directory of each module other than module that
+// packages, from `go list -deps -json`, come from.
+func ModuleDirs(module string, packages []Package) map[string]string {
+	dirs := map[string]string{}
+	for _, p := range packages {
+		if !p.Standard && p.Module != nil && p.Module.Path != module && p.Module.Dir != "" {
+			dirs[p.Module.Path] = p.Module.Dir
+		}
+	}
+	return dirs
+}
+
+// ParsePackages reads the output of `go list -json`.
+func ParsePackages(goList []byte) ([]Package, error) {
+	var packages []Package
+	decoder := json.NewDecoder(bytes.NewReader(goList))
+	for {
+		var p Package
+		err := decoder.Decode(&p)
+		if errors.Is(err, io.EOF) {
+			return packages, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading go list output: %w", err)
+		}
+		packages = append(packages, p)
+	}
+}
 
 // Project is what Verify reads from a project. A missing file is nil.
 type Project struct {
 	GoMod    []byte
 	Golangci []byte
+	// Guide is the project's BASELINE.md.
+	Guide []byte
+	// Workflow is the project's CI workflow, at WorkflowPath.
+	Workflow []byte
 	Devbox   []byte
 	// Dirs lists the project's directories, slash-separated and relative to
 	// its root.
 	Dirs []string
+	// Packages lists the project's packages and everything they depend on,
+	// from `go list -deps -json ./...`.
+	Packages []Package
 }
 
 // ModulePath returns the module path that go.mod declares.
@@ -60,26 +224,103 @@ func ModulePath(goMod []byte) (string, error) {
 	return "", ErrNoModule
 }
 
-// GolangciConfig returns the .golangci.yml for the module at modulePath.
-func GolangciConfig(modulePath string) ([]byte, error) {
+// ioPackages are the standard library packages that do I/O or are
+// non-deterministic, matched with their subpackages.
+func ioPackages() []string {
+	return []string{"crypto/rand", "database/sql", "io/ioutil", "math/rand", "net", "os", "plugin", "syscall"}
+}
+
+// ioExceptions are pure packages under ioPackages.
+func ioExceptions() []string {
+	return []string{"net/mail", "net/netip", "net/url"}
+}
+
+// IsIO reports whether the standard library package at importPath does I/O
+// or is non-deterministic.
+func IsIO(importPath string) bool {
+	if slices.Contains(ioExceptions(), importPath) {
+		return false
+	}
+	return slices.ContainsFunc(ioPackages(), func(p string) bool {
+		return importPath == p || strings.HasPrefix(importPath, p+"/")
+	})
+}
+
+// dependencyAllowlist lists third-party packages that import an I/O package
+// but are safe for the core and shell, each with the reason. Add one only
+// after reading the code that projects call.
+func dependencyAllowlist() map[string]string {
+	return map[string]string{
+		"golang.org/x/tools/go/ssa":              "writes to os.Stdout and os.Stderr only in the debug and sanity-check modes a caller enables",
+		"golang.org/x/tools/internal/typeparams": "writes to os.Stderr only for tracing that a false constant disables; its other use of os is in a file excluded from builds",
+	}
+}
+
+// ImpurePackages returns the third-party packages that import an I/O
+// package, directly or through other third-party packages, leaving out the
+// allowlist. packages come from `go list -deps -json`.
+func ImpurePackages(module string, packages []Package) map[string]bool {
+	byPath := make(map[string]Package, len(packages))
+	for _, p := range packages {
+		byPath[p.ImportPath] = p
+	}
+	allowed := dependencyAllowlist()
+	impure := map[string]bool{}
+	var check func(importPath string) bool
+	check = func(importPath string) bool {
+		if result, done := impure[importPath]; done {
+			return result
+		}
+		p := byPath[importPath]
+		_, isAllowed := allowed[importPath]
+		result := !isAllowed && slices.ContainsFunc(p.Imports, func(imported string) bool {
+			if q, ok := byPath[imported]; ok && !q.Standard && !isOwn(q, module) {
+				return check(imported)
+			}
+			return IsIO(imported)
+		})
+		impure[importPath] = result
+		return result
+	}
+	for _, p := range packages {
+		if !p.Standard && !isOwn(p, module) {
+			check(p.ImportPath)
+		}
+	}
+	maps.DeleteFunc(impure, func(_ string, isImpure bool) bool { return !isImpure })
+	return impure
+}
+
+// GolangciConfig returns the .golangci.yml for a project of kind, with the
+// module at modulePath.
+func GolangciConfig(modulePath string, kind Kind) ([]byte, error) {
 	tmpl, err := template.New("golangci").Parse(golangciTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("parsing the golangci-lint template: %w", err)
 	}
 	var out bytes.Buffer
 	err = tmpl.Execute(&out, struct {
-		Module   string
-		IODenies []string
-	}{
-		Module: modulePath,
-		IODenies: []string{
-			"crypto/rand", "database/sql", "io/ioutil", "math/rand", "net", "os", "plugin", "syscall",
-		},
-	})
+		Module       string
+		Kind         Kind
+		IOPackages   []string
+		IOExceptions []string
+	}{modulePath, kind, ioPackages(), ioExceptions()})
 	if err != nil {
 		return nil, fmt.Errorf("rendering the golangci-lint template: %w", err)
 	}
 	return out.Bytes(), nil
+}
+
+// Guide returns the BASELINE.md every project has: the rules the linters
+// enforce, written for whoever changes the code, people or AI agents.
+func Guide() []byte {
+	return slices.Clone(guide)
+}
+
+// Workflow returns the GitHub Actions workflow every project has, which runs
+// `devbox run check` on each push and pull request.
+func Workflow() []byte {
+	return slices.Clone(workflow)
 }
 
 // Verify returns each way the project differs from the baseline, or nil when
@@ -89,23 +330,39 @@ func Verify(p Project) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	want, err := GolangciConfig(module)
+	if p.Golangci == nil {
+		return []string{".golangci.yml is missing; run `go tool go-baseline write -kind command|pure-library|adapters`"}, nil
+	}
+	kind, err := KindOf(p.Golangci)
+	if err != nil {
+		// A missing or unknown kind is a problem to report, not a failure.
+		return []string{err.Error()}, nil
+	}
+	want, err := GolangciConfig(module, kind)
 	if err != nil {
 		return nil, err
 	}
 	var problems []string
-	switch {
-	case p.Golangci == nil:
-		problems = append(problems, ".golangci.yml is missing; run `go tool go-baseline write`")
-	case !bytes.Equal(p.Golangci, want):
+	if !bytes.Equal(p.Golangci, want) {
 		problems = append(problems, ".golangci.yml differs from the baseline; run `go tool go-baseline write`")
 	}
+	switch {
+	case p.Guide == nil:
+		problems = append(problems, "BASELINE.md is missing; run `go tool go-baseline write`")
+	case !bytes.Equal(p.Guide, guide):
+		problems = append(problems, "BASELINE.md differs from the baseline; run `go tool go-baseline write`")
+	}
+	switch {
+	case p.Workflow == nil:
+		problems = append(problems, WorkflowPath+" is missing; run `go tool go-baseline write`")
+	case !bytes.Equal(p.Workflow, workflow):
+		problems = append(problems, WorkflowPath+" differs from the baseline; run `go tool go-baseline write`")
+	}
 	problems = append(problems, devboxProblems(p.Devbox)...)
-	problems = append(problems, layoutProblems(p.Dirs)...)
+	problems = append(problems, layoutProblems(kind, p.Dirs)...)
+	problems = append(problems, DependencyProblems(module, kind, p.Packages)...)
 	return problems, nil
 }
-
-var exactGo = regexp.MustCompile(`^go@\d+\.\d+\.\d+$`)
 
 func devboxProblems(devbox []byte) []string {
 	if devbox == nil {
@@ -139,6 +396,8 @@ func devboxProblems(devbox []byte) []string {
 	}
 	for _, script := range []struct{ name, want string }{
 		{"lint", LintScript},
+		{"test", TestScript},
+		{"integration", IntegrationScript},
 		{"check", CheckScript},
 	} {
 		var got string
@@ -146,13 +405,10 @@ func devboxProblems(devbox []byte) []string {
 			problems = append(problems, fmt.Sprintf("devbox.json script %q must be %q", script.name, script.want))
 		}
 	}
-	if _, ok := config.Shell.Scripts["test"]; !ok {
-		problems = append(problems, `devbox.json must have a "test" script`)
-	}
 	return problems
 }
 
-func layoutProblems(dirs []string) []string {
+func layoutProblems(kind Kind, dirs []string) []string {
 	var problems []string
 	for _, dir := range dirs {
 		switch base := path.Base(dir); {
@@ -160,7 +416,117 @@ func layoutProblems(dirs []string) []string {
 			problems = append(problems, fmt.Sprintf("%s/: no src/ or pkg/ directories; see https://go.dev/doc/modules/layout", dir))
 		case base == "util" || base == "common" || base == "helpers":
 			problems = append(problems, fmt.Sprintf("%s/: name the package for what it provides, not %q", dir, base))
+		case kind == PureLibrary && (base == "cmd" || base == "adapters"):
+			problems = append(problems, fmt.Sprintf("%s/: a pure library has no %s; put I/O in its caller, or in an adapters module", dir, base))
+		case kind == Adapters && (base == "cmd" || base == "core"):
+			problems = append(problems, fmt.Sprintf("%s/: an adapters module holds only adapters; put %s in another module", dir, base))
 		}
 	}
 	return problems
+}
+
+// DependencyProblems reports each third-party package that a core or shell
+// package depends on, directly or through other packages, and that imports
+// an I/O package. The standard library is trusted: depguard checks the
+// module's own imports of it, and its pure packages import os themselves.
+func DependencyProblems(module string, kind Kind, packages []Package) []string {
+	byPath := make(map[string]Package, len(packages))
+	for _, p := range packages {
+		byPath[p.ImportPath] = p
+	}
+	// reachedFrom maps each third-party package to the first of the module's
+	// packages found to depend on it.
+	reachedFrom := map[string]string{}
+	var walk func(importPath, from string)
+	walk = func(importPath, from string) {
+		p, ok := byPath[importPath]
+		if !ok || p.Standard || isOwn(p, module) {
+			return
+		}
+		if _, seen := reachedFrom[importPath]; seen {
+			return
+		}
+		reachedFrom[importPath] = from
+		for _, imported := range p.Imports {
+			walk(imported, from)
+		}
+	}
+	for _, p := range sortedOwnPackages(module, packages) {
+		if role := RoleOf(kind, relativeDir(module, p.ImportPath)); role != Core && role != Shell {
+			continue
+		}
+		for _, imported := range p.Imports {
+			walk(imported, p.ImportPath)
+		}
+	}
+
+	var problems []string
+	allowed := dependencyAllowlist()
+	for _, importPath := range slices.Sorted(maps.Keys(reachedFrom)) {
+		if _, ok := allowed[importPath]; ok {
+			continue
+		}
+		for _, imported := range byPath[importPath].Imports {
+			if IsIO(imported) {
+				problems = append(problems, fmt.Sprintf(
+					"%s depends on %s, which imports %s; the core and shell can't depend on I/O, even indirectly",
+					reachedFrom[importPath], importPath, imported))
+			}
+		}
+	}
+	return problems
+}
+
+// ParseCoverage reads `go test -cover` output and returns each package's
+// statement coverage, in percent. Packages without statements are left out.
+func ParseCoverage(output []byte) map[string]float64 {
+	coverage := map[string]float64{}
+	for line := range strings.Lines(string(output)) {
+		match := coverageLine.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		if percent, err := strconv.ParseFloat(match[2], 64); err == nil {
+			coverage[match[1]] = percent
+		}
+	}
+	return coverage
+}
+
+// CoverageProblems reports each core package whose coverage is below
+// MinCoreCoverage. packages are the module's own, from `go list -json ./...`.
+func CoverageProblems(module string, kind Kind, packages []Package, coverage map[string]float64) []string {
+	var problems []string
+	for _, p := range sortedOwnPackages(module, packages) {
+		if RoleOf(kind, relativeDir(module, p.ImportPath)) != Core {
+			continue
+		}
+		if percent, ok := coverage[p.ImportPath]; ok && percent < MinCoreCoverage {
+			problems = append(problems, fmt.Sprintf(
+				"%s: core coverage is %.1f%%; it must be at least %.0f%%", p.ImportPath, percent, MinCoreCoverage))
+		}
+	}
+	return problems
+}
+
+func isOwn(p Package, module string) bool {
+	return !p.Standard && p.Module != nil && p.Module.Path == module
+}
+
+func sortedOwnPackages(module string, packages []Package) []Package {
+	var own []Package
+	for _, p := range packages {
+		if isOwn(p, module) {
+			own = append(own, p)
+		}
+	}
+	slices.SortFunc(own, func(a, b Package) int { return strings.Compare(a.ImportPath, b.ImportPath) })
+	return own
+}
+
+func relativeDir(module, importPath string) string {
+	if importPath == module {
+		return ""
+	}
+	return strings.TrimPrefix(importPath, module+"/")
 }

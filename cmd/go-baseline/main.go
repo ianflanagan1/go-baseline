@@ -1,18 +1,29 @@
 // Command go-baseline keeps a Go project on the settings every project
-// shares. `write` generates .golangci.yml from go.mod; `verify` fails when
-// the project has drifted from the baseline.
+// shares. `write` generates .golangci.yml from go.mod, and BASELINE.md;
+// `verify` fails when the project has drifted from the baseline or breaks an
+// architecture rule; `test` runs the tests and fails when a core package's
+// coverage is too low; `map` describes the project's architecture.
 package main
 
 import (
+	"bytes"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/ianflanagan1/go-baseline/internal/adapters/gopackages"
+	"github.com/ianflanagan1/go-baseline/internal/core/analyzers"
 	"github.com/ianflanagan1/go-baseline/internal/core/baseline"
+	"github.com/ianflanagan1/go-baseline/internal/core/projectmap"
 )
+
+const usage = "usage: go-baseline write [-kind command|pure-library|adapters] | verify | test | map"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -22,64 +33,226 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) == 1 {
+	if len(args) > 0 {
 		switch args[0] {
 		case "write":
-			return write()
+			return write(args[1:])
 		case "verify":
-			return verify()
+			if len(args) == 1 {
+				return verify()
+			}
+		case "test":
+			if len(args) == 1 {
+				return test()
+			}
+		case "map":
+			if len(args) == 1 {
+				return describe()
+			}
 		}
 	}
-	return errors.New("usage: go-baseline write|verify")
+	return errors.New(usage)
 }
 
-func write() error {
-	goMod, err := os.ReadFile("go.mod")
-	if err != nil {
-		return fmt.Errorf("reading go.mod: %w", err)
+// write generates .golangci.yml, BASELINE.md and the CI workflow. Without -kind, it keeps the
+// kind the existing .golangci.yml records.
+func write(args []string) error {
+	flags := flag.NewFlagSet("write", flag.ContinueOnError)
+	kindFlag := flags.String("kind", "", "command, pure-library or adapters")
+	if err := flags.Parse(args); err != nil {
+		return err
 	}
-	module, err := baseline.ModulePath(goMod)
+	module, err := readModule()
 	if err != nil {
 		return err
 	}
-	config, err := baseline.GolangciConfig(module)
+	kind, err := chooseKind(*kindFlag)
+	if err != nil {
+		return err
+	}
+	config, err := baseline.GolangciConfig(module, kind)
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(".golangci.yml", config, 0o644); err != nil {
 		return fmt.Errorf("writing .golangci.yml: %w", err)
 	}
+	if err := os.WriteFile("BASELINE.md", baseline.Guide(), 0o644); err != nil {
+		return fmt.Errorf("writing BASELINE.md: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(baseline.WorkflowPath), 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", filepath.Dir(baseline.WorkflowPath), err)
+	}
+	if err := os.WriteFile(baseline.WorkflowPath, baseline.Workflow(), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", baseline.WorkflowPath, err)
+	}
 	return nil
 }
 
-func verify() error {
-	goMod, err := os.ReadFile("go.mod")
+func chooseKind(flagValue string) (baseline.Kind, error) {
+	if flagValue != "" {
+		return baseline.ParseKind(flagValue)
+	}
+	golangci, err := readOptional(".golangci.yml")
 	if err != nil {
+		return "", err
+	}
+	return baseline.KindOf(golangci)
+}
+
+func verify() error {
+	var p baseline.Project
+	var err error
+	if p.GoMod, err = os.ReadFile("go.mod"); err != nil {
 		return fmt.Errorf("reading go.mod: %w", err)
+	}
+	if p.Golangci, err = readOptional(".golangci.yml"); err != nil {
+		return err
+	}
+	if p.Guide, err = readOptional("BASELINE.md"); err != nil {
+		return err
+	}
+	if p.Workflow, err = readOptional(baseline.WorkflowPath); err != nil {
+		return err
+	}
+	if p.Devbox, err = readOptional("devbox.json"); err != nil {
+		return err
+	}
+	if p.Dirs, err = projectDirs(); err != nil {
+		return err
+	}
+	if p.Packages, err = goList("-deps"); err != nil {
+		return err
+	}
+	problems, err := baseline.Verify(p)
+	if err != nil {
+		return err
+	}
+	diagnostics, err := analyse(p)
+	if err != nil {
+		return err
+	}
+	return report(append(problems, diagnostics...), "the project differs from the baseline")
+}
+
+// analyse runs the architecture analyzers. When the kind is missing, Verify
+// has already reported it, and there's nothing to analyse against.
+func analyse(p baseline.Project) ([]string, error) {
+	module, err := baseline.ModulePath(p.GoMod)
+	if err != nil {
+		return nil, err
+	}
+	kind, kindErr := baseline.KindOf(p.Golangci)
+	if kindErr != nil {
+		// Verify has reported it.
+		return nil, nil
+	}
+	pure, err := pureModules(baseline.ModuleDirs(module, p.Packages))
+	if err != nil {
+		return nil, err
+	}
+	project := analyzers.Project{Module: module, Kind: kind, Impure: baseline.ImpurePackages(module, p.Packages), PureModules: pure}
+	return gopackages.Analyze(".", analyzers.All(project))
+}
+
+// pureModules returns the modules, from their directories, whose
+// .golangci.yml records the pure-library module kind.
+func pureModules(dirs map[string]string) (map[string]bool, error) {
+	pure := map[string]bool{}
+	for module, dir := range dirs {
+		golangci, err := readOptional(filepath.Join(dir, ".golangci.yml"))
+		if err != nil {
+			return nil, err
+		}
+		if kind, err := baseline.KindOf(golangci); err == nil && kind == baseline.PureLibrary {
+			pure[module] = true
+		}
+	}
+	return pure, nil
+}
+
+// describe prints each package's role, and the ports the shell declares
+// with the adapters that implement them.
+func describe() error {
+	module, err := readModule()
+	if err != nil {
+		return err
 	}
 	golangci, err := readOptional(".golangci.yml")
 	if err != nil {
 		return err
 	}
-	devbox, err := readOptional("devbox.json")
+	kind, err := baseline.KindOf(golangci)
 	if err != nil {
 		return err
 	}
-	dirs, err := projectDirs()
+	pkgs, err := gopackages.Types(".")
 	if err != nil {
 		return err
 	}
-	problems, err := baseline.Verify(baseline.Project{GoMod: goMod, Golangci: golangci, Devbox: devbox, Dirs: dirs})
+	fmt.Print(projectmap.Format(kind, projectmap.Describe(module, kind, pkgs)))
+	return nil
+}
+
+// test runs the tests with coverage, then checks the core's coverage.
+func test() error {
+	module, err := readModule()
 	if err != nil {
 		return err
 	}
+	golangci, err := readOptional(".golangci.yml")
+	if err != nil {
+		return err
+	}
+	kind, err := baseline.KindOf(golangci)
+	if err != nil {
+		return err
+	}
+	var output bytes.Buffer
+	cmd := exec.Command("go", "test", "-cover", "./...")
+	cmd.Stdout = io.MultiWriter(os.Stdout, &output)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go test: %w", err)
+	}
+	packages, err := goList()
+	if err != nil {
+		return err
+	}
+	return report(baseline.CoverageProblems(module, kind, packages, baseline.ParseCoverage(output.Bytes())),
+		"the core's tests don't cover enough of it")
+}
+
+func report(problems []string, summary string) error {
 	for _, problem := range problems {
 		fmt.Fprintln(os.Stderr, problem)
 	}
 	if len(problems) > 0 {
-		return errors.New("the project differs from the baseline")
+		return errors.New(summary)
 	}
 	return nil
+}
+
+func readModule() (string, error) {
+	goMod, err := os.ReadFile("go.mod")
+	if err != nil {
+		return "", fmt.Errorf("reading go.mod: %w", err)
+	}
+	return baseline.ModulePath(goMod)
+}
+
+// goList describes the module's packages, and with -deps everything they
+// depend on, not counting tests.
+func goList(flags ...string) ([]baseline.Package, error) {
+	args := append([]string{"list", "-json=ImportPath,Standard,Imports,Module"}, flags...)
+	var stderr strings.Builder
+	cmd := exec.Command("go", append(args, "./...")...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list: %w: %s", err, stderr.String())
+	}
+	return baseline.ParsePackages(out)
 }
 
 // readOptional returns nil, and no error, when the file doesn't exist.
