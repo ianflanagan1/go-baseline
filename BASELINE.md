@@ -6,8 +6,8 @@ The rules this project shares with every Go project built on go-baseline. The li
 
 ## Working on the project
 
-- Run `devbox run check` before finishing a change. It must pass.
-- Don't edit `.golangci.yml` or this file; `verify` fails if they differ from the baseline. A rule that's wrong for every project changes in go-baseline.
+- Run `devbox run -- task check` before finishing a change. It must pass.
+- Don't edit `.golangci.yml`, `Taskfile.yml` or this file; `verify` fails if they differ from the baseline. Put the project's own tasks in `Taskfile.project.yml`, which `Taskfile.yml` includes. A rule that's wrong for every project changes in go-baseline.
 - Don't silence a linter with `//nolint`. Restructure the code so the rule holds.
 - Run `devbox run -- go mod tidy` after changing dependencies. `verify` fails when `go.mod` is untidy, or when the code calls a function with a known vulnerability; upgrade the dependency to fix one.
 - Run tools through devbox (`devbox run -- go ...`), so the pinned Go and golangci-lint are used.
@@ -69,11 +69,11 @@ case rates.Retry:
 | The clock (`time.Now`, `time.Sleep` and the like), printing (`fmt.Print*`), the global loggers | Banned | Banned | Allowed | Allowed |
 | Reading configuration: environment variables, flags, `os.Args`, the env adapter | Banned | Banned | Banned | Allowed: read it all here and pass the values in |
 | The module's own packages | Core only | Core and shell | Core and other adapters; not the shell | Anything |
-| Size | No limit | Cyclomatic complexity at most 8, cognitive at most 10 | Cyclomatic complexity at most 8, cognitive at most 10, functions at most 50 lines and 30 statements | Functions at most 50 lines and 30 statements |
+| Size | Cognitive complexity at most 10 | Cognitive complexity at most 10 | Cognitive complexity at most 10, functions at most 50 lines and 30 statements | Functions at most 50 lines and 30 statements |
 
 Test files are exempt from the purity and size rules, so integration tests can use real dependencies.
 
-Tests that need a real outside service, such as a database or a third-party API, go in files that start with `//go:build integration`. `devbox run test` leaves them out so it stays fast and needs nothing running; `devbox run integration` runs every test. Tests that use a local stand-in, such as `httptest` or a temporary directory, are ordinary tests.
+Tests that need a real outside service, such as a database or a third-party API, go in files that start with `//go:build integration`. `devbox run -- task test` leaves them out so it stays fast and needs nothing running; `devbox run -- task integration` runs every test. Tests that use a local stand-in, such as `httptest` or a temporary directory, are ordinary tests.
 
 Adapters are kept thin so decisions can't hide in them. When an adapter grows a decision, move the decision to the core and pass its result in.
 
@@ -156,6 +156,58 @@ Tests of the shell use a fake for each port:
 type fixedClock struct{ now time.Time }
 
 func (c fixedClock) Now() time.Time { return c.now }
+```
+
+## Inbound adapters
+
+The adapters above are driven: the shell calls them through its ports. An HTTP server, a queue consumer or a command-line framework drives the program instead: it calls in. It's still an adapter, since it does I/O, and adapters can't import the shell, so it declares the interface it calls, in the core's types. The shell satisfies it without importing the adapter, and `cmd/` passes one to the other.
+
+The adapter only translates: it reads the request into bytes, lets the core parse and validate them, calls the shell and writes the result:
+
+```go
+// Package httpapi serves the orders API over HTTP.
+package httpapi
+
+// Orders is what the API calls to place an order.
+type Orders interface {
+	Place(ctx context.Context, order orders.Order) (orders.Receipt, error)
+}
+
+// Handler returns the API's handler, which places orders through o.
+func Handler(o Orders) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /orders", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "reading the request", http.StatusBadRequest)
+			return
+		}
+		order, err := orders.Parse(body) // the core decides what's valid
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		receipt, err := o.Place(r.Context(), order) // the shell acts
+		if err != nil {
+			http.Error(w, "placing the order", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(receipt)
+	})
+	return mux
+}
+```
+
+The adapter reads the body itself rather than passing `r.Body` to the core, because the core takes values, not a reader that does I/O. `cmd/` wires the shell into it:
+
+```go
+shop := app.NewShop(store)
+srv := &http.Server{Addr: addr, Handler: httpapi.Handler(shop), ReadHeaderTimeout: 5 * time.Second}
+if err := srv.ListenAndServe(); err != nil {
+	return fmt.Errorf("serving: %w", err)
+}
+return nil
 ```
 
 ## Libraries

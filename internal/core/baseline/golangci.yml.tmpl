@@ -24,7 +24,6 @@ linters:
     - gochecknoinits
     - gochecksumtype
     - gocognit
-    - gocyclo
     - gosec
     - modernize
     - revive
@@ -130,8 +129,6 @@ linters:
       default-signifies-exhaustive: false
     gocognit:
       min-complexity: 10
-    gocyclo:
-      min-complexity: 8
     govet:
       enable:
         - nilness
@@ -151,7 +148,6 @@ linters:
           - forbidigo
           - funlen
           - gocognit
-          - gocyclo
           - gosec
           - wrapcheck
 {{- if eq .Kind "adapters"}}
@@ -175,18 +171,13 @@ linters:
       - path-except: (^|/)(cmd|adapters)/
         linters:
           - funlen
-{{- if eq .Kind "pure-library"}}
-      - path-except: (^|/)adapters/
+{{- if eq .Kind "command"}}
+      # The composition root is limited by funlen instead. Everywhere else
+      # a function stays simple enough to review: decisions in the core are
+      # split into named functions rather than nested.
+      - path: (^|/)cmd/
         linters:
           - gocognit
-          - gocyclo
-{{- else}}
-      # Adapters and the shell have little branching: decisions belong in
-      # the core.
-      - path: (^|/)(cmd|internal/core)/
-        linters:
-          - gocognit
-          - gocyclo
 {{- end}}
 {{- end}}
 

@@ -1,0 +1,106 @@
+version: '3'
+
+tasks:
+  new:
+    desc: >-
+      Create a Go project from go-template:
+      task new KIND=command|pure-library|adapters MODULE=<module-path> DIR=<absolute-dir>
+    requires:
+      vars:
+        - name: KIND
+          enum: [command, pure-library, adapters]
+        - MODULE
+        - DIR
+    preconditions:
+      - sh: '[ {{isAbs .DIR}} = true ]'
+        msg: DIR must be an absolute path, since devbox runs tasks from this repository's root
+    cmds:
+      - go run golang.org/x/tools/cmd/gonew@v0.52.0 github.com/ianflanagan1/go-template {{shellQuote .MODULE}} {{shellQuote .DIR}}
+      - task: '{{if eq .KIND "command"}}new:command{{else}}new:library{{end}}'
+      - task: new:finish
+
+  new:command:
+    internal: true
+    dir: '{{.DIR}}'
+    vars:
+      NAME: '{{base .MODULE}}'
+      MAIN: cmd/{{base .MODULE}}/main.go
+      README: |
+        # {{base .MODULE}}
+
+        TODO: what it does, and for whom.
+
+        ## Running
+
+        ```sh
+        devbox run -- task build
+        ./bin/{{base .MODULE}}
+        ```
+
+        ## Configuration
+
+        Read only in `cmd/{{base .MODULE}}`.
+
+        | Environment variable or flag | Meaning | Default |
+        |---|---|---|
+
+        ## Architecture
+
+        `go tool go-baseline map` lists each package's role, the ports the shell declares and the adapters that implement them. The rules are in `BASELINE.md`.
+    cmds:
+      - mv cmd/app cmd/{{shellQuote .NAME}}
+      # -i.bak works with both GNU and BSD (macOS) sed.
+      - sed -i.bak {{shellQuote (printf "s/^\\/\\/ Command app /\\/\\/ Command %s /; s/\"app:\"/\"%s:\"/" .NAME .NAME)}} {{shellQuote .MAIN}}
+      - rm {{shellQuote .MAIN}}.bak
+      - |
+        if ! grep -q {{shellQuote (printf "^// Command %s " .NAME)}} {{shellQuote .MAIN}} || ! grep -q {{shellQuote (printf "\"%s:\"" .NAME)}} {{shellQuote .MAIN}}; then
+          echo "new: couldn't rename the command in {{.MAIN}}; go-template's main.go has changed" >&2
+          exit 1
+        fi
+      - printf '%s' {{shellQuote .README}} > README.md
+
+  new:library:
+    internal: true
+    dir: '{{.DIR}}'
+    vars:
+      # The package is named for the module, without a go- prefix, hyphens or dots.
+      PACKAGE: '{{base .MODULE | trimPrefix "go-" | replace "-" "" | replace "." "" | lower}}'
+      README: |
+        # {{base .MODULE}}
+
+        TODO: what it provides, and for whom.
+
+        ## Usage
+
+        ```go
+        import "{{.MODULE}}"
+        ```
+
+        ## Architecture
+
+        This is a `{{.KIND}}` module. `go tool go-baseline map` lists each package's role. The rules are in `BASELINE.md`.
+    preconditions:
+      - sh: '[ {{regexMatch "^[a-z_][a-z0-9_]*$" .PACKAGE}} = true ]'
+        msg: new can't make a package name from {{base .MODULE}}
+    cmds:
+      # A library builds no programs, so it has neither cmd/ nor go-template's build task.
+      - rm -r cmd Taskfile.project.yml
+      - |
+        printf '// Package %s TODO: say what it provides.\npackage %s\n' {{shellQuote .PACKAGE}} {{shellQuote .PACKAGE}} > doc.go
+      - printf '%s' {{shellQuote .README}} > README.md
+
+  new:finish:
+    internal: true
+    dir: '{{.DIR}}'
+    cmds:
+      - rm LICENSE
+      # Start on the latest go-baseline, not the version go-template pins. Ask
+      # GitHub directly: the module proxy caches @latest, so it can lag a release.
+      - GOPROXY=direct go get -tool github.com/ianflanagan1/go-baseline/cmd/go-baseline@latest
+      - go mod tidy
+      - go tool go-baseline write -kind {{shellQuote .KIND}}
+      - devbox run -- task check
+      - git init --quiet --initial-branch=main
+      - git add --all
+      - git commit --quiet --message "Initialise from go-template"
+      - echo "Created {{.MODULE}} in {{.DIR}}"

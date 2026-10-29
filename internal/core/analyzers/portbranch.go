@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"iter"
 	"slices"
 	"strings"
 
@@ -147,21 +148,45 @@ func (s shell) check(fn *ssa.Function, seeds []ssa.Value, reported map[token.Pos
 			s.pass.Report(analysis.Diagnostic{Pos: d.pos, Message: d.message})
 		}
 	}
-	for _, block := range fn.Blocks {
-		for _, instr := range block.Instrs {
-			closure, ok := instr.(*ssa.MakeClosure)
-			if !ok {
-				continue
-			}
-			inner := closure.Fn.(*ssa.Function)
-			var captured []ssa.Value
-			for i, binding := range closure.Bindings {
-				if tainted[binding] {
-					captured = append(captured, inner.FreeVars[i])
+	for _, closure := range closures(fn) {
+		if captured := capturedTaints(closure, tainted); len(captured) > 0 {
+			s.check(closure.Fn.(*ssa.Function), captured, reported)
+		}
+	}
+}
+
+// closures returns the closures fn makes.
+func closures(fn *ssa.Function) []*ssa.MakeClosure {
+	var found []*ssa.MakeClosure
+	for _, instr := range instructions(fn) {
+		if closure, ok := instr.(*ssa.MakeClosure); ok {
+			found = append(found, closure)
+		}
+	}
+	return found
+}
+
+// capturedTaints returns the closure's free variables that capture a tainted
+// value.
+func capturedTaints(closure *ssa.MakeClosure, tainted map[ssa.Value]bool) []ssa.Value {
+	inner := closure.Fn.(*ssa.Function)
+	var captured []ssa.Value
+	for i, binding := range closure.Bindings {
+		if tainted[binding] {
+			captured = append(captured, inner.FreeVars[i])
+		}
+	}
+	return captured
+}
+
+// instructions yields each of fn's instructions with its block.
+func instructions(fn *ssa.Function) iter.Seq2[*ssa.BasicBlock, ssa.Instruction] {
+	return func(yield func(*ssa.BasicBlock, ssa.Instruction) bool) {
+		for _, block := range fn.Blocks {
+			for _, instr := range block.Instrs {
+				if !yield(block, instr) {
+					return
 				}
-			}
-			if len(captured) > 0 {
-				s.check(inner, captured, reported)
 			}
 		}
 	}
@@ -170,19 +195,17 @@ func (s shell) check(fn *ssa.Function, seeds []ssa.Value, reported map[token.Pos
 // decisions returns where fn decides on a tainted value.
 func (s shell) decisions(fn *ssa.Function, tainted map[ssa.Value]bool) []decision {
 	var found []decision
-	for _, block := range fn.Blocks {
-		for _, instr := range block.Instrs {
-			switch instr := instr.(type) {
-			case *ssa.If:
-				if tainted[instr.Cond] && !isRangeLoop(block) {
-					found = append(found, decision{
-						position(instr.Cond, fn),
-						"the shell branches on a value read through a port; pass it to the core and act on what the core returns",
-					})
-				}
-			case ssa.CallInstruction:
-				found = append(found, s.callDecisions(instr, tainted)...)
+	for block, instr := range instructions(fn) {
+		switch instr := instr.(type) {
+		case *ssa.If:
+			if tainted[instr.Cond] && !isRangeLoop(block) {
+				found = append(found, decision{
+					position(instr.Cond, fn),
+					"the shell branches on a value read through a port; pass it to the core and act on what the core returns",
+				})
 			}
+		case ssa.CallInstruction:
+			found = append(found, s.callDecisions(instr, tainted)...)
 		}
 	}
 	return found
@@ -238,20 +261,26 @@ func (s shell) taint(fn *ssa.Function, seeds []ssa.Value, ports bool) map[ssa.Va
 	for _, v := range seeds {
 		tainted[v] = true
 	}
-	for changed := true; changed; {
-		changed = false
-		for _, block := range fn.Blocks {
-			for _, instr := range block.Instrs {
-				for _, v := range s.taints(instr, tainted, ports) {
-					if !tainted[v] {
-						tainted[v] = true
-						changed = true
-					}
-				}
+	for {
+		if !s.spread(fn, tainted, ports) {
+			return tainted
+		}
+	}
+}
+
+// spread taints what fn's instructions taint, given those already tainted,
+// and reports whether it tainted anything new.
+func (s shell) spread(fn *ssa.Function, tainted map[ssa.Value]bool, ports bool) bool {
+	changed := false
+	for _, instr := range instructions(fn) {
+		for _, v := range s.taints(instr, tainted, ports) {
+			if !tainted[v] {
+				tainted[v] = true
+				changed = true
 			}
 		}
 	}
-	return tainted
+	return changed
 }
 
 // taints returns the values that instr taints, given those already tainted.
@@ -266,10 +295,7 @@ func (s shell) taints(instr ssa.Instruction, tainted map[ssa.Value]bool, ports b
 		return s.callTaints(instr, tainted, ports)
 	case *ssa.Extract:
 		if sel, isSelect := instr.Tuple.(*ssa.Select); isSelect {
-			if selectTainted(sel, instr.Index, tainted) {
-				return []ssa.Value{instr}
-			}
-			return nil
+			return selectTaints(instr, sel, tainted)
 		}
 	case *ssa.BinOp:
 		if isErrorNilCheck(instr) {
@@ -308,12 +334,18 @@ func (s shell) callTaints(call ssa.CallInstruction, tainted map[ssa.Value]bool, 
 	default:
 		result, writes = s.calleeTaints(callee, common.Args, tainted, ports, argsTainted)
 	}
+	return callOutputs(call, result, writes)
+}
+
+// callOutputs returns call's result when result is set, and what it may
+// write through its arguments when writes is.
+func callOutputs(call ssa.CallInstruction, result, writes bool) []ssa.Value {
 	var out []ssa.Value
 	if v := call.Value(); v != nil && result {
 		out = append(out, v)
 	}
 	if writes {
-		for _, arg := range common.Args {
+		for _, arg := range call.Common().Args {
 			out = append(out, referents(arg)...)
 		}
 	}
@@ -363,6 +395,14 @@ func referents(v ssa.Value) []ssa.Value {
 		}
 		out = append(out, v)
 	}
+}
+
+// selectTaints returns extract, a result of sel, when it's tainted.
+func selectTaints(extract *ssa.Extract, sel *ssa.Select, tainted map[ssa.Value]bool) []ssa.Value {
+	if selectTainted(sel, extract.Index, tainted) {
+		return []ssa.Value{extract}
+	}
+	return nil
 }
 
 // selectTainted reports whether the index'th result of sel is tainted. Which
@@ -419,30 +459,37 @@ func isRangeLoop(block *ssa.BasicBlock) bool {
 // position returns where v is written in the source. A value the compiler
 // made, such as a φ-node, takes the position of one it was made from.
 func position(v ssa.Value, fn *ssa.Function) token.Pos {
-	seen := map[ssa.Value]bool{}
-	var find func(v ssa.Value) token.Pos
-	find = func(v ssa.Value) token.Pos {
-		if seen[v] {
-			return token.NoPos
-		}
-		seen[v] = true
-		if v.Pos().IsValid() {
-			return v.Pos()
-		}
-		switch v := v.(type) {
-		case *ssa.Extract:
-			return find(v.Tuple)
-		case *ssa.Phi:
-			for _, edge := range v.Edges {
-				if pos := find(edge); pos.IsValid() {
-					return pos
-				}
-			}
-		}
-		return token.NoPos
-	}
-	if pos := find(v); pos.IsValid() {
+	if pos := sourcePos(v, map[ssa.Value]bool{}); pos.IsValid() {
 		return pos
 	}
 	return fn.Pos()
+}
+
+// sourcePos returns where v, or a value it was made from, is written, or
+// token.NoPos. seen holds the values already tried.
+func sourcePos(v ssa.Value, seen map[ssa.Value]bool) token.Pos {
+	if seen[v] {
+		return token.NoPos
+	}
+	seen[v] = true
+	if v.Pos().IsValid() {
+		return v.Pos()
+	}
+	switch v := v.(type) {
+	case *ssa.Extract:
+		return sourcePos(v.Tuple, seen)
+	case *ssa.Phi:
+		return firstSourcePos(v.Edges, seen)
+	}
+	return token.NoPos
+}
+
+// firstSourcePos returns the first valid sourcePos of values, or token.NoPos.
+func firstSourcePos(values []ssa.Value, seen map[ssa.Value]bool) token.Pos {
+	for _, v := range values {
+		if pos := sourcePos(v, seen); pos.IsValid() {
+			return pos
+		}
+	}
+	return token.NoPos
 }

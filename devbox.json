@@ -1,16 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.18.4/.schema/devbox.schema.json",
-  "packages": ["go@1.27.3", "golangci-lint@2.15.0"],
+  "packages": ["go@1.27.3", "golangci-lint@2.15.0", "go-task@3.53.1"],
   "env": {
     "GOTOOLCHAIN": "local"
-  },
-  "shell": {
-    "scripts": {
-      "new":   "sh scripts/new.sh \"$@\"",
-      "test":  "go tool go-baseline test",
-      "integration": "go test -tags integration ./...",
-      "lint":  "golangci-lint run && golangci-lint fmt --diff",
-      "check": "go tool go-baseline verify && devbox run lint && devbox run test"
-    }
   }
 }

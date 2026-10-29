@@ -22,21 +22,6 @@ import (
 // the version the generated config is written for.
 const GolangciLintVersion = "2.15.0"
 
-// LintScript is the devbox "lint" script every project has.
-const LintScript = "golangci-lint run && golangci-lint fmt --diff"
-
-// TestScript is the devbox "test" script every project has: the tests, then
-// the core's coverage.
-const TestScript = "go tool go-baseline test"
-
-// IntegrationScript is the devbox "integration" script every project has: all
-// the tests, including those behind the integration build tag, which need
-// real outside services.
-const IntegrationScript = "go test -tags integration ./..."
-
-// CheckScript is the devbox "check" script every project has.
-const CheckScript = "go tool go-baseline verify && devbox run lint && devbox run test"
-
 // MinCoreCoverage is the statement coverage, in percent, that each core
 // package's tests must reach.
 const MinCoreCoverage = 80.0
@@ -56,11 +41,18 @@ var guide []byte
 //go:embed check.yml
 var workflow []byte
 
+//go:embed Taskfile.yml
+var taskfile []byte
+
+// TaskfilePath is where every project has its Taskfile.
+const TaskfilePath = "Taskfile.yml"
+
 // WorkflowPath is where every project has its CI workflow.
 const WorkflowPath = ".github/workflows/check.yml"
 
 var (
 	exactGo      = regexp.MustCompile(`^go@\d+\.\d+\.\d+$`)
+	exactTask    = regexp.MustCompile(`^go-task@\d+\.\d+\.\d+$`)
 	kindLine     = regexp.MustCompile(`(?m)^# Module kind: ([a-z-]+)\.`)
 	coverageLine = regexp.MustCompile(`^(?:ok|FAIL)?\s+(\S+)\s.*coverage: ([0-9.]+)% of statements`)
 )
@@ -196,6 +188,8 @@ type Project struct {
 	Guide []byte
 	// Workflow is the project's CI workflow, at WorkflowPath.
 	Workflow []byte
+	// Taskfile is the project's Taskfile, at TaskfilePath.
+	Taskfile []byte
 	Devbox   []byte
 	// Dirs lists the project's directories, slash-separated and relative to
 	// its root.
@@ -260,35 +254,47 @@ func dependencyAllowlist() map[string]string {
 // package, directly or through other third-party packages, leaving out the
 // allowlist. packages come from `go list -deps -json`.
 func ImpurePackages(module string, packages []Package) map[string]bool {
-	byPath := make(map[string]Package, len(packages))
-	for _, p := range packages {
-		byPath[p.ImportPath] = p
+	c := impurity{
+		module:  module,
+		byPath:  packagesByPath(packages),
+		allowed: dependencyAllowlist(),
+		impure:  map[string]bool{},
 	}
-	allowed := dependencyAllowlist()
-	impure := map[string]bool{}
-	var check func(importPath string) bool
-	check = func(importPath string) bool {
-		if result, done := impure[importPath]; done {
-			return result
+	for _, p := range packages {
+		if isThirdParty(p, module) {
+			c.isImpure(p.ImportPath)
 		}
-		p := byPath[importPath]
-		_, isAllowed := allowed[importPath]
-		result := !isAllowed && slices.ContainsFunc(p.Imports, func(imported string) bool {
-			if q, ok := byPath[imported]; ok && !q.Standard && !isOwn(q, module) {
-				return check(imported)
-			}
-			return IsIO(imported)
-		})
-		impure[importPath] = result
+	}
+	maps.DeleteFunc(c.impure, func(_ string, isImpure bool) bool { return !isImpure })
+	return c.impure
+}
+
+// impurity works out which third-party packages import I/O, remembering
+// each answer in impure.
+type impurity struct {
+	module  string
+	byPath  map[string]Package
+	allowed map[string]string
+	impure  map[string]bool
+}
+
+func (c impurity) isImpure(importPath string) bool {
+	if result, done := c.impure[importPath]; done {
 		return result
 	}
-	for _, p := range packages {
-		if !p.Standard && !isOwn(p, module) {
-			check(p.ImportPath)
-		}
+	_, isAllowed := c.allowed[importPath]
+	result := !isAllowed && slices.ContainsFunc(c.byPath[importPath].Imports, c.importsIO)
+	c.impure[importPath] = result
+	return result
+}
+
+// importsIO reports whether imported is an I/O package or, for a
+// third-party package, imports one.
+func (c impurity) importsIO(imported string) bool {
+	if q, ok := c.byPath[imported]; ok && isThirdParty(q, c.module) {
+		return c.isImpure(imported)
 	}
-	maps.DeleteFunc(impure, func(_ string, isImpure bool) bool { return !isImpure })
-	return impure
+	return IsIO(imported)
 }
 
 // GolangciConfig returns the .golangci.yml for a project of kind, with the
@@ -318,9 +324,16 @@ func Guide() []byte {
 }
 
 // Workflow returns the GitHub Actions workflow every project has, which runs
-// `devbox run check` on each push and pull request.
+// `devbox run -- task check` on each push and pull request.
 func Workflow() []byte {
 	return slices.Clone(workflow)
+}
+
+// Taskfile returns the Taskfile every project has, with the check, lint,
+// lint-file, test and integration tasks. It includes the project's own tasks from
+// Taskfile.project.yml.
+func Taskfile() []byte {
+	return slices.Clone(taskfile)
 }
 
 // Verify returns each way the project differs from the baseline, or nil when
@@ -358,6 +371,12 @@ func Verify(p Project) ([]string, error) {
 	case !bytes.Equal(p.Workflow, workflow):
 		problems = append(problems, WorkflowPath+" differs from the baseline; run `go tool go-baseline write`")
 	}
+	switch {
+	case p.Taskfile == nil:
+		problems = append(problems, TaskfilePath+" is missing; run `go tool go-baseline write`")
+	case !bytes.Equal(p.Taskfile, taskfile):
+		problems = append(problems, TaskfilePath+" differs from the baseline; run `go tool go-baseline write`, and put the project's own tasks in Taskfile.project.yml")
+	}
 	problems = append(problems, devboxProblems(p.Devbox)...)
 	problems = append(problems, layoutProblems(kind, p.Dirs)...)
 	problems = append(problems, DependencyProblems(module, kind, p.Packages)...)
@@ -379,31 +398,26 @@ func devboxProblems(devbox []byte) []string {
 		return []string{fmt.Sprintf("devbox.json can't be read as a list of packages, string env and scripts: %v", err)}
 	}
 
-	var problems []string
-	var hasGo, hasLint bool
-	for _, pkg := range config.Packages {
-		hasGo = hasGo || exactGo.MatchString(pkg)
-		hasLint = hasLint || pkg == "golangci-lint@"+GolangciLintVersion
-	}
-	if !hasGo {
-		problems = append(problems, "devbox.json must pin Go to an exact version, such as go@1.27.3")
-	}
-	if !hasLint {
-		problems = append(problems, "devbox.json must pin golangci-lint@"+GolangciLintVersion)
-	}
+	problems := devboxPackageProblems(config.Packages)
 	if config.Env["GOTOOLCHAIN"] != "local" {
 		problems = append(problems, `devbox.json must set env GOTOOLCHAIN to "local"`)
 	}
-	for _, script := range []struct{ name, want string }{
-		{"lint", LintScript},
-		{"test", TestScript},
-		{"integration", IntegrationScript},
-		{"check", CheckScript},
-	} {
-		var got string
-		if err := json.Unmarshal(config.Shell.Scripts[script.name], &got); err != nil || got != script.want {
-			problems = append(problems, fmt.Sprintf("devbox.json script %q must be %q", script.name, script.want))
-		}
+	for _, name := range slices.Sorted(maps.Keys(config.Shell.Scripts)) {
+		problems = append(problems, fmt.Sprintf("devbox.json script %q: move it into a task in Taskfile.project.yml; devbox only pins tools", name))
+	}
+	return problems
+}
+
+func devboxPackageProblems(packages []string) []string {
+	var problems []string
+	if !slices.ContainsFunc(packages, exactGo.MatchString) {
+		problems = append(problems, "devbox.json must pin Go to an exact version, such as go@1.27.3")
+	}
+	if !slices.Contains(packages, "golangci-lint@"+GolangciLintVersion) {
+		problems = append(problems, "devbox.json must pin golangci-lint@"+GolangciLintVersion)
+	}
+	if !slices.ContainsFunc(packages, exactTask.MatchString) {
+		problems = append(problems, "devbox.json must pin go-task, which runs the Taskfile, to an exact version, such as go-task@3.53.1")
 	}
 	return problems
 }
@@ -430,47 +444,55 @@ func layoutProblems(kind Kind, dirs []string) []string {
 // an I/O package. The standard library is trusted: depguard checks the
 // module's own imports of it, and its pure packages import os themselves.
 func DependencyProblems(module string, kind Kind, packages []Package) []string {
-	byPath := make(map[string]Package, len(packages))
-	for _, p := range packages {
-		byPath[p.ImportPath] = p
-	}
-	// reachedFrom maps each third-party package to the first of the module's
-	// packages found to depend on it.
-	reachedFrom := map[string]string{}
-	var walk func(importPath, from string)
-	walk = func(importPath, from string) {
-		p, ok := byPath[importPath]
-		if !ok || p.Standard || isOwn(p, module) {
-			return
-		}
-		if _, seen := reachedFrom[importPath]; seen {
-			return
-		}
-		reachedFrom[importPath] = from
-		for _, imported := range p.Imports {
-			walk(imported, from)
-		}
-	}
+	r := reach{module: module, byPath: packagesByPath(packages), from: map[string]string{}}
 	for _, p := range sortedOwnPackages(module, packages) {
 		if role := RoleOf(kind, relativeDir(module, p.ImportPath)); role != Core && role != Shell {
 			continue
 		}
 		for _, imported := range p.Imports {
-			walk(imported, p.ImportPath)
+			r.walk(imported, p.ImportPath)
 		}
 	}
+	return r.ioProblems()
+}
 
+// reach finds the third-party packages the module's packages depend on.
+// from maps each to the first of the module's packages found to depend on
+// it.
+type reach struct {
+	module string
+	byPath map[string]Package
+	from   map[string]string
+}
+
+func (r reach) walk(importPath, from string) {
+	p, ok := r.byPath[importPath]
+	if !ok || !isThirdParty(p, r.module) {
+		return
+	}
+	if _, seen := r.from[importPath]; seen {
+		return
+	}
+	r.from[importPath] = from
+	for _, imported := range p.Imports {
+		r.walk(imported, from)
+	}
+}
+
+// ioProblems reports each I/O import of a package reached, leaving out the
+// allowlist.
+func (r reach) ioProblems() []string {
 	var problems []string
 	allowed := dependencyAllowlist()
-	for _, importPath := range slices.Sorted(maps.Keys(reachedFrom)) {
+	for _, importPath := range slices.Sorted(maps.Keys(r.from)) {
 		if _, ok := allowed[importPath]; ok {
 			continue
 		}
-		for _, imported := range byPath[importPath].Imports {
+		for _, imported := range r.byPath[importPath].Imports {
 			if IsIO(imported) {
 				problems = append(problems, fmt.Sprintf(
 					"%s depends on %s, which imports %s; the core and shell can't depend on I/O, even indirectly",
-					reachedFrom[importPath], importPath, imported))
+					r.from[importPath], importPath, imported))
 			}
 		}
 	}
@@ -507,6 +529,18 @@ func CoverageProblems(module string, kind Kind, packages []Package, coverage map
 		}
 	}
 	return problems
+}
+
+func packagesByPath(packages []Package) map[string]Package {
+	byPath := make(map[string]Package, len(packages))
+	for _, p := range packages {
+		byPath[p.ImportPath] = p
+	}
+	return byPath
+}
+
+func isThirdParty(p Package, module string) bool {
+	return !p.Standard && !isOwn(p, module)
 }
 
 func isOwn(p Package, module string) bool {

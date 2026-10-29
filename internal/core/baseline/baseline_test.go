@@ -13,16 +13,8 @@ import (
 const goMod = "module example.com/app\n\ngo 1.27\n"
 
 const devbox = `{
-  "packages": ["go@1.27.3", "golangci-lint@` + baseline.GolangciLintVersion + `"],
-  "env": {"GOTOOLCHAIN": "local"},
-  "shell": {
-    "scripts": {
-      "test":  "` + baseline.TestScript + `",
-      "integration": "` + baseline.IntegrationScript + `",
-      "lint":  "` + baseline.LintScript + `",
-      "check": "` + baseline.CheckScript + `"
-    }
-  }
+  "packages": ["go@1.27.3", "golangci-lint@` + baseline.GolangciLintVersion + `", "go-task@3.53.1"],
+  "env": {"GOTOOLCHAIN": "local"}
 }`
 
 func matchingProject(t *testing.T) baseline.Project {
@@ -36,6 +28,7 @@ func matchingProject(t *testing.T) baseline.Project {
 		Golangci: golangci,
 		Guide:    baseline.Guide(),
 		Workflow: baseline.Workflow(),
+		Taskfile: baseline.Taskfile(),
 		Devbox:   []byte(devbox),
 		Dirs:     []string{"cmd", "cmd/app", "internal", "internal/core", "internal/core/greet"},
 	}
@@ -103,14 +96,29 @@ func TestTheGeneratedConfigRequiresWrappingOnlyOtherModulesErrors(t *testing.T) 
 	}
 }
 
-func TestTheGeneratedConfigLimitsTheShellsComplexity(t *testing.T) {
-	config, err := baseline.GolangciConfig("example.com/app", baseline.Command)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "      - path: (^|/)(cmd|internal/core)/\n        linters:\n          - gocognit\n          - gocyclo\n"
-	if !strings.Contains(string(config), want) {
-		t.Fatalf("config doesn't exempt only the core and composition root from the complexity limits:\n%s", config)
+func TestTheGeneratedConfigLimitsTheComplexityOfEveryPackageButTheCompositionRoot(t *testing.T) {
+	cmdExemption := "      - path: (^|/)cmd/\n        linters:\n          - gocognit\n"
+	for _, tc := range []struct {
+		kind baseline.Kind
+		// Besides enabling gocognit and exempting tests.
+		exemptions int
+	}{
+		{baseline.Command, 1},
+		{baseline.PureLibrary, 0},
+		{baseline.Adapters, 0},
+	} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			config, err := baseline.GolangciConfig("example.com/app", tc.kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Count(string(config), "- gocognit\n") - 2; got != tc.exemptions {
+				t.Fatalf("got %d gocognit exemptions besides tests, want %d:\n%s", got, tc.exemptions, config)
+			}
+			if tc.exemptions == 1 && !strings.Contains(string(config), cmdExemption) {
+				t.Fatalf("config doesn't exempt only the composition root:\n%s", config)
+			}
+		})
 	}
 }
 
@@ -188,6 +196,14 @@ func TestWorkflowDriftIsReported(t *testing.T) {
 	assertOneProblem(t, verify(t, p), "check.yml differs")
 }
 
+func TestTaskfileDriftIsReported(t *testing.T) {
+	p := matchingProject(t)
+	p.Taskfile = nil
+	assertOneProblem(t, verify(t, p), "Taskfile.yml is missing")
+	p.Taskfile = append(baseline.Taskfile(), "  build:\n    cmds: [go build ./...]\n"...)
+	assertOneProblem(t, verify(t, p), "put the project's own tasks in Taskfile.project.yml")
+}
+
 func TestAMissingGuideIsReported(t *testing.T) {
 	p := matchingProject(t)
 	p.Guide = nil
@@ -208,10 +224,8 @@ func TestDevboxDriftIsReported(t *testing.T) {
 		{"go pinned to a minor version", `"go@1.27.3"`, `"go@1.27"`, "pin Go"},
 		{"another golangci-lint", "golangci-lint@" + baseline.GolangciLintVersion, "golangci-lint@2.0.0", "golangci-lint@"},
 		{"toolchain downloads allowed", `"GOTOOLCHAIN": "local"`, `"GOTOOLCHAIN": "auto"`, "GOTOOLCHAIN"},
-		{"check without verify", baseline.CheckScript, "devbox run test", `"check"`},
-		{"lint without formatting", baseline.LintScript, "golangci-lint run", `"lint"`},
-		{"tests without coverage", baseline.TestScript, "go test ./...", `"test"`},
-		{"integration tests without the tag", baseline.IntegrationScript, "go test ./...", `"integration"`},
+		{"go-task not pinned", `"go-task@3.53.1"`, `"go-task@latest"`, "pin go-task"},
+		{"a devbox script", `"env"`, `"shell": {"scripts": {"build": "go build ./..."}}, "env"`, `script "build": move it`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := matchingProject(t)

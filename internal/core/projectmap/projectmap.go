@@ -76,34 +76,49 @@ func roleOf(module string, kind baseline.Kind, pkg *types.Package) baseline.Role
 // the project's adapters, and in the third-party packages that its
 // composition roots and adapters import.
 func adapterTypes(module string, kind baseline.Kind, pkgs []*types.Package) []*types.TypeName {
-	var candidates []*types.TypeName
-	seen := map[*types.Package]bool{}
-	add := func(pkg *types.Package) {
-		if seen[pkg] {
-			return
-		}
-		seen[pkg] = true
-		for _, name := range pkg.Scope().Names() {
-			if tn, ok := pkg.Scope().Lookup(name).(*types.TypeName); ok && !types.IsInterface(tn.Type()) {
-				candidates = append(candidates, tn)
-			}
+	var sources []*types.Package
+	for _, pkg := range pkgs {
+		switch roleOf(module, kind, pkg) {
+		case baseline.Adapter:
+			sources = append(sources, pkg)
+			sources = append(sources, thirdPartyImports(module, pkg)...)
+		case baseline.Root:
+			sources = append(sources, thirdPartyImports(module, pkg)...)
+		case baseline.Core, baseline.Shell:
 		}
 	}
-	for _, pkg := range pkgs {
-		role := roleOf(module, kind, pkg)
-		if role != baseline.Adapter && role != baseline.Root {
-			continue
-		}
-		if role == baseline.Adapter {
-			add(pkg)
-		}
-		for _, imported := range pkg.Imports() {
-			if first, _, _ := strings.Cut(imported.Path(), "/"); strings.Contains(first, ".") && !strings.HasPrefix(imported.Path(), module) {
-				add(imported)
-			}
+	var candidates []*types.TypeName
+	seen := map[*types.Package]bool{}
+	for _, pkg := range sources {
+		if !seen[pkg] {
+			seen[pkg] = true
+			candidates = append(candidates, concreteTypes(pkg)...)
 		}
 	}
 	return candidates
+}
+
+// thirdPartyImports returns the packages pkg imports from other modules,
+// leaving out the standard library.
+func thirdPartyImports(module string, pkg *types.Package) []*types.Package {
+	var found []*types.Package
+	for _, imported := range pkg.Imports() {
+		if first, _, _ := strings.Cut(imported.Path(), "/"); strings.Contains(first, ".") && !strings.HasPrefix(imported.Path(), module) {
+			found = append(found, imported)
+		}
+	}
+	return found
+}
+
+// concreteTypes returns pkg's named types that aren't interfaces.
+func concreteTypes(pkg *types.Package) []*types.TypeName {
+	var found []*types.TypeName
+	for _, name := range pkg.Scope().Names() {
+		if tn, ok := pkg.Scope().Lookup(name).(*types.TypeName); ok && !types.IsInterface(tn.Type()) {
+			found = append(found, tn)
+		}
+	}
+	return found
 }
 
 func ports(pkg *types.Package, candidates []*types.TypeName) []Port {
@@ -117,13 +132,19 @@ func ports(pkg *types.Package, candidates []*types.TypeName) []Port {
 		if !ok || iface.NumMethods() == 0 {
 			continue
 		}
-		port := Port{Name: name}
-		for _, c := range candidates {
-			if types.Implements(c.Type(), iface) || types.Implements(types.NewPointer(c.Type()), iface) {
-				port.Implementations = append(port.Implementations, c.Pkg().Name()+"."+c.Name()+" ("+c.Pkg().Path()+")")
-			}
+		found = append(found, Port{Name: name, Implementations: implementations(iface, candidates)})
+	}
+	return found
+}
+
+// implementations names the candidates that implement iface, directly or
+// through a pointer.
+func implementations(iface *types.Interface, candidates []*types.TypeName) []string {
+	var found []string
+	for _, c := range candidates {
+		if types.Implements(c.Type(), iface) || types.Implements(types.NewPointer(c.Type()), iface) {
+			found = append(found, c.Pkg().Name()+"."+c.Name()+" ("+c.Pkg().Path()+")")
 		}
-		found = append(found, port)
 	}
 	return found
 }

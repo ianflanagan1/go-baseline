@@ -57,7 +57,7 @@ func run(args []string) error {
 	return errors.New(usage)
 }
 
-// write generates .golangci.yml, BASELINE.md and the CI workflow. Without -kind, it keeps the
+// write generates .golangci.yml, BASELINE.md, the CI workflow and the Taskfile. Without -kind, it keeps the
 // kind the existing .golangci.yml records.
 func write(args []string) error {
 	flags := flag.NewFlagSet("write", flag.ContinueOnError)
@@ -89,6 +89,9 @@ func write(args []string) error {
 	if err := os.WriteFile(baseline.WorkflowPath, baseline.Workflow(), 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", baseline.WorkflowPath, err)
 	}
+	if err := os.WriteFile(baseline.TaskfilePath, baseline.Taskfile(), 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", baseline.TaskfilePath, err)
+	}
 	return nil
 }
 
@@ -104,27 +107,8 @@ func chooseKind(flagValue string) (baseline.Kind, error) {
 }
 
 func verify() error {
-	var p baseline.Project
-	var err error
-	if p.GoMod, err = os.ReadFile("go.mod"); err != nil {
-		return fmt.Errorf("reading go.mod: %w", err)
-	}
-	if p.Golangci, err = readOptional(".golangci.yml"); err != nil {
-		return err
-	}
-	if p.Guide, err = readOptional("BASELINE.md"); err != nil {
-		return err
-	}
-	if p.Workflow, err = readOptional(baseline.WorkflowPath); err != nil {
-		return err
-	}
-	if p.Devbox, err = readOptional("devbox.json"); err != nil {
-		return err
-	}
-	if p.Dirs, err = projectDirs(); err != nil {
-		return err
-	}
-	if p.Packages, err = goList("-deps"); err != nil {
+	p, err := readProject()
+	if err != nil {
 		return err
 	}
 	problems, err := baseline.Verify(p)
@@ -144,6 +128,38 @@ func verify() error {
 		return err
 	}
 	return vulncheck()
+}
+
+// readProject reads what Verify checks from the project in the working
+// directory.
+func readProject() (baseline.Project, error) {
+	var p baseline.Project
+	var err error
+	if p.GoMod, err = os.ReadFile("go.mod"); err != nil {
+		return p, fmt.Errorf("reading go.mod: %w", err)
+	}
+	if p.Golangci, err = readOptional(".golangci.yml"); err != nil {
+		return p, err
+	}
+	if p.Guide, err = readOptional("BASELINE.md"); err != nil {
+		return p, err
+	}
+	if p.Workflow, err = readOptional(baseline.WorkflowPath); err != nil {
+		return p, err
+	}
+	if p.Taskfile, err = readOptional(baseline.TaskfilePath); err != nil {
+		return p, err
+	}
+	if p.Devbox, err = readOptional("devbox.json"); err != nil {
+		return p, err
+	}
+	if p.Dirs, err = projectDirs(); err != nil {
+		return p, err
+	}
+	if p.Packages, err = goList("-deps"); err != nil {
+		return p, err
+	}
+	return p, nil
 }
 
 // tidyProblems reports go.mod or go.sum differing from what `go mod tidy`

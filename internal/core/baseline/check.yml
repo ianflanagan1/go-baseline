@@ -18,4 +18,4 @@ jobs:
         with:
           devbox-version: 0.18.5
           enable-cache: true
-      - run: devbox run check
+      - run: devbox run -- task check

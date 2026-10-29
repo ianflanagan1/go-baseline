@@ -7,17 +7,17 @@ The settings every Go project shares, and the command that keeps a project on th
 From this repo, with the module kind: `command`, `pure-library` (no I/O; every package is core) or `adapters` (shared adapters, such as go-adapters):
 
 ```sh
-devbox run new <kind> github.com/ianflanagan1/<name> ~/projects-ianf/<category>/<name>
+devbox run -- task new KIND=<kind> MODULE=github.com/ianflanagan1/<name> DIR=~/projects-ianf/<category>/<name>
 ```
 
-The directory must be an absolute path, because devbox runs scripts from this repo's root. The script:
+The directory must be an absolute path, because devbox runs tasks from this repo's root. The task, in `Taskfile.project.yml`:
 
 1. copies go-template with `gonew`, rewriting the module path in `go.mod` and every import;
-2. for a command, renames `cmd/app` to `cmd/<name>`; otherwise removes `cmd/` and adds a root `doc.go`, its package named for the module without a `go-` prefix;
+2. for a command, renames `cmd/app` to `cmd/<name>`; otherwise removes `cmd/` and go-template's `Taskfile.project.yml`, with its `build` task, and adds a root `doc.go`, its package named for the module without a `go-` prefix;
 3. writes a README skeleton for the kind, and removes the licence, so you choose one;
 4. upgrades go-baseline to its latest release, so a project never starts on an old baseline;
-5. generates `.golangci.yml`, which records the module kind, `BASELINE.md` and the CI workflow for the new module;
-6. runs `devbox run check`;
+5. generates `.golangci.yml`, which records the module kind, `BASELINE.md`, the CI workflow and `Taskfile.yml` for the new module;
+6. runs `devbox run -- task check`;
 7. creates a git repo on `main` with one commit.
 
 Publish it with `github publish` from repo-tools.
@@ -27,11 +27,12 @@ Publish it with `github publish` from repo-tools.
 | Setting | Where | Checked by |
 |---|---|---|
 | golangci-lint config, generated from the module path in `go.mod` | `.golangci.yml` | `verify`: must match byte for byte |
-| CI: `devbox run check` on each push and pull request | `.github/workflows/check.yml` | `verify`: must match byte for byte |
+| CI: `devbox run -- task check` on each push and pull request | `.github/workflows/check.yml` | `verify`: must match byte for byte |
+| `check`, `lint`, `lint-file`, `test` and `integration` tasks, including the project's own from `Taskfile.project.yml` | `Taskfile.yml` | `verify`: must match byte for byte |
 | The architecture and conventions, with examples, for people and AI agents | `BASELINE.md`, imported by the project's `CLAUDE.md` | `verify`: must match byte for byte |
-| Go pinned to an exact version, golangci-lint pinned to the baseline's version | `devbox.json` packages | `verify` |
+| Go and go-task pinned to exact versions, golangci-lint pinned to the baseline's version | `devbox.json` packages | `verify` |
 | `GOTOOLCHAIN=local` | `devbox.json` env | `verify` |
-| `lint`, `test`, `integration` and `check` scripts | `devbox.json` scripts | `verify` |
+| No scripts: every command is a task | `devbox.json` | `verify` |
 | Values reaching the core through interfaces, functions, fields or type arguments are pure (`coreboundary`) | code | `verify` |
 | Configuration (environment, flags, `os.Args`) is read only in `cmd/` (`configread`) | code | `verify` |
 | No third-party dependency of a core or shell package imports an I/O package, at any depth | `go.mod` | `verify`, from `go list -deps` |
@@ -41,11 +42,11 @@ Publish it with `github publish` from repo-tools.
 | No data races in the tests | tests | `test`, with `-race` |
 | No `src/` or `pkg/` at the root, no `util`, `common` or `helpers` package | directories | `verify` |
 
-`devbox run check` runs `go tool go-baseline verify`, then the linters, then `go tool go-baseline test`.
+`devbox run -- task check` runs `go tool go-baseline verify`, then the linters, then `go tool go-baseline test`.
 
 ## The layout the linters enforce
 
-[BASELINE.md](BASELINE.md) sets out the roles (core, shell, adapter, composition root), the rules for each and examples. Its source is `internal/core/baseline/BASELINE.md`. A package's directory decides its role: `RoleOf` in `baseline.go` and the paths in the golangci-lint template must agree. The analyzers use `RoleOf` too. depguard enforces the import rules; forbidigo bans the clock, printing and the global loggers outside `cmd/` and adapters; gocyclo, gocognit and funlen keep adapters thin and `cmd/` small. Test files are exempt from both, so integration tests can use real dependencies. The other linters cover the Go guide: exhaustive switches (`exhaustive`, `gochecksumtype`), no package-level state (`gochecknoglobals`, `gochecknoinits`), doc comments on exported names (`revive`), `errors.Is` and `errors.As` (`errorlint`), errors from other modules wrapped where they come in (`wrapcheck`) and `package foo_test` tests (`testpackage`). gosec, modernize and govet's nilness look for bugs and risky code. gosec's G204 and G304, running a command or opening a file named by a variable, are allowed in `cmd/` and adapters, whose job that is. gofumpt and goimports format.
+[BASELINE.md](BASELINE.md) sets out the roles (core, shell, adapter, composition root), the rules for each and examples. Its source is `internal/core/baseline/BASELINE.md`. A package's directory decides its role: `RoleOf` in `baseline.go` and the paths in the golangci-lint template must agree. The analyzers use `RoleOf` too. depguard enforces the import rules; forbidigo bans the clock, printing and the global loggers outside `cmd/` and adapters; gocognit keeps every function but `cmd/`'s simple enough to review, and funlen keeps adapters thin and `cmd/` small. Test files are exempt from both, so integration tests can use real dependencies. The other linters cover the Go guide: exhaustive switches (`exhaustive`, `gochecksumtype`), no package-level state (`gochecknoglobals`, `gochecknoinits`), doc comments on exported names (`revive`), `errors.Is` and `errors.As` (`errorlint`), errors from other modules wrapped where they come in (`wrapcheck`) and `package foo_test` tests (`testpackage`). gosec, modernize and govet's nilness look for bugs and risky code. gosec's G204 and G304, running a command or opening a file named by a variable, are allowed in `cmd/` and adapters, whose job that is. gofumpt and goimports format.
 
 ## Tools considered
 
@@ -58,7 +59,7 @@ Decisions on the common Go analysis tools, recorded 28 October 2026. golangci-li
 | Compiler, `go vet`, `internal/` | Toolchain and language. `go vet` runs as golangci-lint's govet |
 | staticcheck, U1000 | golangci-lint's `staticcheck` and `unused` |
 | errcheck, errorlint, exhaustive, gochecksumtype, depguard, revive | golangci-lint |
-| gocyclo and gocognit | Both, deliberately: cyclomatic complexity at most 8, cognitive at most 10, for adapters and the shell |
+| gocognit | Cognitive complexity at most 10, everywhere but `cmd/` and tests |
 | funlen | golangci-lint, for adapters and `cmd/` |
 | revive and staticcheck ST | Both. revive's `exported` rule enforces doc comments |
 | goimports | golangci-lint formatter |
@@ -78,7 +79,8 @@ Decisions on the common Go analysis tools, recorded 28 October 2026. golangci-li
 |---|---|
 | gofmt | Replaced by gofumpt, a strict superset |
 | golint | Deprecated; revive replaces it |
-| cyclop | Duplicates gocyclo and gocognit |
+| gocyclo | Counts each `case`, so an exhaustive switch over a large enum or sum type fails it however simple the switch is, and the no-`//nolint` rule leaves no way out. gocognit counts a switch once |
+| cyclop | Cyclomatic complexity, like gocyclo |
 | revive's function-length rule | Duplicates funlen |
 | gomodguard | `verify`'s dependency check, from `go list -deps`, is stricter |
 | go-arch-lint, arch-go | depguard, `RoleOf` and the coreboundary, portbranch and configread analysers enforce the architecture more precisely |
@@ -108,14 +110,14 @@ golangci-lint can't extend a shared config, so a project can't add its own rules
 
 ## Changing a shared setting
 
-1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, or the constants in `baseline.go`. To let the core and shell use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint, change `GolangciLintVersion` and the version in this repo's `devbox.json` together.
-2. `devbox run check`, commit, then `github release . minor`.
+1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, the tasks in `internal/core/baseline/Taskfile.yml`, or the constants in `baseline.go`. To let the core and shell use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint, change `GolangciLintVersion` and the version in this repo's `devbox.json` together.
+2. `devbox run -- task check`, commit, then `github release . minor`.
 3. In go-template and each project:
 
    ```sh
    devbox run -- go get -tool github.com/ianflanagan1/go-baseline/cmd/go-baseline@latest
    devbox run -- go tool go-baseline write
-   devbox run check
+   devbox run -- task check
    ```
 
    A project that hasn't done this keeps passing on the old version; one that upgrades without `write` fails `verify`.
