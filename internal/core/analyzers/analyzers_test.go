@@ -46,3 +46,28 @@ func TestPortBranch(t *testing.T) {
 		"example.com/app/internal/orders", "example.com/app/internal/notify",
 		"example.com/app/internal/core/pricing")
 }
+
+// ignoreExpectations is for running an analyzer to read its diagnostics
+// without // want comments, which every analyzer run on a package must meet.
+type ignoreExpectations struct{}
+
+func (ignoreExpectations) Errorf(string, ...any) {}
+
+func TestTheGuidesExamplesPassEveryAnalyzer(t *testing.T) {
+	for _, a := range analyzers.All(project(baseline.Command)) {
+		t.Run(a.Name, func(t *testing.T) {
+			results := analysistest.Run(ignoreExpectations{}, analysistest.TestData(), a, "example.com/app/internal/guide")
+			if len(results) == 0 {
+				t.Fatal("the guide's examples didn't load")
+			}
+			for _, result := range results {
+				if result.Err != nil {
+					t.Fatal(result.Err)
+				}
+				for _, d := range result.Diagnostics {
+					t.Errorf("%s: %s", result.Pass.Fset.Position(d.Pos), d.Message)
+				}
+			}
+		})
+	}
+}

@@ -59,6 +59,8 @@ case rates.Retry:
 
 `verify` enforces this. It follows a port's value through anything computed from it outside the core, including `errors.Is`, `len`, a struct or slice it's stored in, and what a call such as `json.Unmarshal` writes through a pointer passed with it. It reports an `if`, `switch` or loop condition that depends on it, a function chosen by it, and passing it to another shell function that branches on it. Ranging over a port's value is allowed: doing the same thing for each element isn't a decision. Neither is which case of a `select` ran. Computing with a port's value without branching, such as sorting it, isn't detected, but belongs in the core too.
 
+A core function earns its place by making a decision its test states. One that only compares its argument with a constant, such as `func IsMissing(err error) bool` or `func TooMany(status int) bool`, moves the shell's `if` into the core without deciding anything. Pass the core the whole value instead, and have it return what to do. When there's more than one thing to do, that's a sum type with a case for each, which the shell switches on: see the retry loop under [Libraries](#libraries).
+
 ### What each role may do
 
 | Rule | Core | Shell | Adapter | Composition root |
@@ -210,6 +212,51 @@ if err := srv.ListenAndServe(); err != nil {
 return nil
 ```
 
+## Databases
+
+Declare a port for what the shell stores and looks up, named in the domain's terms, and put the SQL in the adapter that implements it. The shell and core see only the core's types:
+
+```go
+// Orders is the port for stored orders.
+type Orders interface {
+	// ByID returns the order with id, and whether there is one.
+	ByID(ctx context.Context, id int64) (order orders.Order, found bool, err error)
+}
+```
+
+The adapter runs the query and translates: each column into a field, and "no such row" into `found` rather than an error:
+
+```go
+// ByID looks up the order with id.
+func (s Store) ByID(ctx context.Context, id int64) (orders.Order, bool, error) {
+	var o orders.Order
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, customer, total_pence, placed_at FROM orders WHERE id = $1`, id,
+	).Scan(&o.ID, &o.Customer, &o.TotalPence, &o.PlacedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return orders.Order{}, false, nil
+	}
+	if err != nil {
+		return orders.Order{}, false, fmt.Errorf("loading order %d: %w", id, err)
+	}
+	return o, true, nil
+}
+```
+
+The shell passes both to the core, which decides what a missing order means:
+
+```go
+order, found, err := store.ByID(ctx, id)
+if err != nil {
+	return orders.Reply{}, fmt.Errorf("showing order %d: %w", id, err)
+}
+return orders.Show(order, found), nil
+```
+
+Return concrete values from a port, not an interface such as a sum type: `verify` can't tell what's behind an interface the shell passes to the core. A fake of the port is a map, and the adapter's integration test runs its queries against a real database.
+
+Use go-ports' `sqlmsg` with go-adapters' `sqlquery` only where the core decides the query itself, such as a search over filters the user picks: the core builds a `sqlmsg.Query` and reads the `sqlmsg.Rows` that come back.
+
 ## Libraries
 
 A library is a `pure-library`: it takes data and returns data, and its caller does the I/O. An API client builds requests and parses responses as `httpmsg` values from go-ports; the caller's shell sends them through its own port, which `cmd/` satisfies with go-adapters' `httpsend`:
@@ -220,7 +267,62 @@ resp, err := sender.Send(ctx, req)      // caller's shell, through its port
 rate, err := rates.ParseLatest(resp)    // pure library parses a value
 ```
 
-A flow over several requests, such as paging or retries, stays pure the same way: the library returns the next request, or the delay before a retry, and the shell sends it or waits.
+A flow over several requests, such as paging or retries, stays pure the same way. The library returns the next step as a sum type:
+
+```go
+// Step is what to do after a response: Retry, Done or Fail.
+//
+//sumtype:decl
+type Step interface{ isStep() }
+
+// Retry is to send Request again after Wait.
+type Retry struct {
+	Request httpmsg.Request
+	Wait    time.Duration
+}
+
+// Done holds the rate the response gave.
+type Done struct{ Rate Rate }
+
+// Fail holds why the response gave no rate.
+type Fail struct{ Err error }
+
+func (Retry) isStep() {}
+func (Done) isStep()  {}
+func (Fail) isStep()  {}
+
+// Next decides what to do with resp, the response to req on attempt, counting from 0.
+func Next(req httpmsg.Request, resp httpmsg.Response, attempt int) Step {
+	if resp.Status == 429 && attempt < 3 {
+		return Retry{Request: req, Wait: time.Duration(attempt+1) * time.Second}
+	}
+	rate, err := ParseLatest(resp)
+	if err != nil {
+		return Fail{Err: err}
+	}
+	return Done{Rate: rate}
+}
+```
+
+The caller's shell is a loop that does what each step says:
+
+```go
+for attempt := 0; ; attempt++ {
+	resp, err := sender.Send(ctx, req)
+	if err != nil {
+		return rates.Rate{}, fmt.Errorf("fetching the rate: %w", err)
+	}
+	switch step := rates.Next(req, resp, attempt).(type) {
+	case rates.Retry:
+		sleeper.Sleep(ctx, step.Wait)
+		req = step.Request
+	case rates.Done:
+		return step.Rate, nil
+	case rates.Fail:
+		return rates.Rate{}, fmt.Errorf("fetching the rate: %w", step.Err)
+	}
+}
+```
 
 I/O shared by several projects goes in an `adapters` module, such as go-adapters, never in a library.
 
