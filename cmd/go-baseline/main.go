@@ -1,12 +1,14 @@
 // Command go-baseline keeps a Go project on the settings every project
 // shares. `write` generates .golangci.yml from go.mod, and BASELINE.md;
-// `verify` fails when the project has drifted from the baseline or breaks an
-// architecture rule; `test` runs the tests and fails when a core package's
+// `verify` fails when the project has drifted from the baseline, breaks an
+// architecture rule, has an untidy go.mod or calls a known vulnerability;
+// `test` runs the tests and fails when a core package's
 // coverage is too low; `map` describes the project's architecture.
 package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"github.com/ianflanagan1/go-baseline/internal/core/analyzers"
 	"github.com/ianflanagan1/go-baseline/internal/core/baseline"
 	"github.com/ianflanagan1/go-baseline/internal/core/projectmap"
+	"golang.org/x/vuln/scan"
 )
 
 const usage = "usage: go-baseline write [-kind command|pure-library|adapters] | verify | test | map"
@@ -132,7 +135,47 @@ func verify() error {
 	if err != nil {
 		return err
 	}
-	return report(append(problems, diagnostics...), "the project differs from the baseline")
+	untidy, err := tidyProblems()
+	if err != nil {
+		return err
+	}
+	problems = append(append(problems, diagnostics...), untidy...)
+	if err := report(problems, "the project differs from the baseline"); err != nil {
+		return err
+	}
+	return vulncheck()
+}
+
+// tidyProblems reports go.mod or go.sum differing from what `go mod tidy`
+// would write.
+func tidyProblems() ([]string, error) {
+	var stdout, stderr strings.Builder
+	cmd := exec.Command("go", "mod", "tidy", "-diff")
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if stdout.Len() > 0 {
+		return []string{"go.mod or go.sum isn't tidy; run `go mod tidy`:\n" + stdout.String()}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("go mod tidy: %w: %s", err, stderr.String())
+	}
+	return nil, nil
+}
+
+// vulncheck runs govulncheck, which fails when the code calls a function
+// with a known vulnerability.
+func vulncheck() error {
+	cmd := scan.Command(context.Background(), "./...")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting govulncheck: %w", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("govulncheck: %w", err)
+	}
+	return nil
 }
 
 // analyse runs the architecture analyzers. When the kind is missing, Verify
@@ -194,7 +237,7 @@ func describe() error {
 	return nil
 }
 
-// test runs the tests with coverage, then checks the core's coverage.
+// test runs the tests with coverage and the race detector, then checks the core's coverage.
 func test() error {
 	module, err := readModule()
 	if err != nil {
@@ -209,7 +252,7 @@ func test() error {
 		return err
 	}
 	var output bytes.Buffer
-	cmd := exec.Command("go", "test", "-cover", "./...")
+	cmd := exec.Command("go", "test", "-race", "-cover", "./...")
 	cmd.Stdout = io.MultiWriter(os.Stdout, &output)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -9,6 +9,7 @@ The rules this project shares with every Go project built on go-baseline. The li
 - Run `devbox run check` before finishing a change. It must pass.
 - Don't edit `.golangci.yml` or this file; `verify` fails if they differ from the baseline. A rule that's wrong for every project changes in go-baseline.
 - Don't silence a linter with `//nolint`. Restructure the code so the rule holds.
+- Run `devbox run -- go mod tidy` after changing dependencies. `verify` fails when `go.mod` is untidy, or when the code calls a function with a known vulnerability; upgrade the dependency to fix one.
 - Run tools through devbox (`devbox run -- go ...`), so the pinned Go and golangci-lint are used.
 - Run `go tool go-baseline map` to see each package's role, the ports the shell declares and the adapters that implement them.
 
