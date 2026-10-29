@@ -69,7 +69,7 @@ case rates.Retry:
 | The clock (`time.Now`, `time.Sleep` and the like), printing (`fmt.Print*`), the global loggers | Banned | Banned | Allowed | Allowed |
 | Reading configuration: environment variables, flags, `os.Args`, the env adapter | Banned | Banned | Banned | Allowed: read it all here and pass the values in |
 | The module's own packages | Core only | Core and shell | Core and other adapters; not the shell | Anything |
-| Size | No limit | No limit | Cyclomatic complexity at most 8, cognitive at most 10, functions at most 50 lines and 30 statements | Functions at most 50 lines and 30 statements |
+| Size | No limit | Cyclomatic complexity at most 8, cognitive at most 10 | Cyclomatic complexity at most 8, cognitive at most 10, functions at most 50 lines and 30 statements | Functions at most 50 lines and 30 statements |
 
 Test files are exempt from the purity and size rules, so integration tests can use real dependencies.
 

@@ -63,7 +63,7 @@ func write(args []string) error {
 	flags := flag.NewFlagSet("write", flag.ContinueOnError)
 	kindFlag := flags.String("kind", "", "command, pure-library or adapters")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return fmt.Errorf("parsing the write flags: %w", err)
 	}
 	module, err := readModule()
 	if err != nil {
@@ -77,16 +77,16 @@ func write(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(".golangci.yml", config, 0o644); err != nil {
+	if err := os.WriteFile(".golangci.yml", config, 0o600); err != nil {
 		return fmt.Errorf("writing .golangci.yml: %w", err)
 	}
-	if err := os.WriteFile("BASELINE.md", baseline.Guide(), 0o644); err != nil {
+	if err := os.WriteFile("BASELINE.md", baseline.Guide(), 0o600); err != nil {
 		return fmt.Errorf("writing BASELINE.md: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(baseline.WorkflowPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(baseline.WorkflowPath), 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(baseline.WorkflowPath), err)
 	}
-	if err := os.WriteFile(baseline.WorkflowPath, baseline.Workflow(), 0o644); err != nil {
+	if err := os.WriteFile(baseline.WorkflowPath, baseline.Workflow(), 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", baseline.WorkflowPath, err)
 	}
 	return nil

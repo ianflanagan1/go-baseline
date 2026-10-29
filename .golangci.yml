@@ -21,8 +21,11 @@ linters:
     - gochecksumtype
     - gocognit
     - gocyclo
+    - gosec
+    - modernize
     - revive
     - testpackage
+    - wrapcheck
   settings:
     depguard:
       rules:
@@ -135,10 +138,18 @@ linters:
       min-complexity: 10
     gocyclo:
       min-complexity: 8
+    govet:
+      enable:
+        - nilness
     revive:
       enable-default-rules: true
       rules:
         - name: exported
+    wrapcheck:
+      # The module's own packages wrap their errors with context; wrap those
+      # from other modules where they come in.
+      ignore-package-globs:
+        - github.com/ianflanagan1/go-baseline/*
   exclusions:
     rules:
       - path: _test\.go
@@ -147,20 +158,30 @@ linters:
           - funlen
           - gocognit
           - gocyclo
+          - gosec
+          - wrapcheck
       - path: (^|/)(cmd|adapters)/
         linters:
           - forbidigo
+      # Running commands and opening files by name is what adapters and the
+      # composition root are for.
+      - path: (^|/)(cmd|adapters)/
+        text: G204|G304
+        linters:
+          - gosec
       # Adapters and the composition root are kept thin and small; the core
       # and shell are limited by their own rules instead.
       - path-except: (^|/)(cmd|adapters)/
         linters:
           - funlen
-      - path-except: (^|/)adapters/
+      # Adapters and the shell have little branching: decisions belong in
+      # the core.
+      - path: (^|/)(cmd|internal/core)/
         linters:
           - gocognit
           - gocyclo
 
 formatters:
   enable:
-    - gofmt
+    - gofumpt
     - goimports

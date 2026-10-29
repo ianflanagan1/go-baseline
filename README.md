@@ -45,7 +45,54 @@ Publish it with `github publish` from repo-tools.
 
 ## The layout the linters enforce
 
-[BASELINE.md](BASELINE.md) sets out the roles (core, shell, adapter, composition root), the rules for each and examples. Its source is `internal/core/baseline/BASELINE.md`. A package's directory decides its role: `RoleOf` in `baseline.go` and the paths in the golangci-lint template must agree. The analyzers use `RoleOf` too. depguard enforces the import rules; forbidigo bans the clock, printing and the global loggers outside `cmd/` and adapters; gocyclo, gocognit and funlen keep adapters thin and `cmd/` small. Test files are exempt from both, so integration tests can use real dependencies. The other linters cover the Go guide: exhaustive switches (`exhaustive`, `gochecksumtype`), no package-level state (`gochecknoglobals`, `gochecknoinits`), doc comments on exported names (`revive`), `errors.Is` and `errors.As` (`errorlint`) and `package foo_test` tests (`testpackage`).
+[BASELINE.md](BASELINE.md) sets out the roles (core, shell, adapter, composition root), the rules for each and examples. Its source is `internal/core/baseline/BASELINE.md`. A package's directory decides its role: `RoleOf` in `baseline.go` and the paths in the golangci-lint template must agree. The analyzers use `RoleOf` too. depguard enforces the import rules; forbidigo bans the clock, printing and the global loggers outside `cmd/` and adapters; gocyclo, gocognit and funlen keep adapters thin and `cmd/` small. Test files are exempt from both, so integration tests can use real dependencies. The other linters cover the Go guide: exhaustive switches (`exhaustive`, `gochecksumtype`), no package-level state (`gochecknoglobals`, `gochecknoinits`), doc comments on exported names (`revive`), `errors.Is` and `errors.As` (`errorlint`), errors from other modules wrapped where they come in (`wrapcheck`) and `package foo_test` tests (`testpackage`). gosec, modernize and govet's nilness look for bugs and risky code. gosec's G204 and G304, running a command or opening a file named by a variable, are allowed in `cmd/` and adapters, whose job that is. gofumpt and goimports format.
+
+## Tools considered
+
+Decisions on the common Go analysis tools, recorded 28 October 2026. golangci-lint's `standard` set is errcheck, govet, ineffassign, staticcheck and unused.
+
+### In use
+
+| Tool | How |
+|---|---|
+| Compiler, `go vet`, `internal/` | Toolchain and language. `go vet` runs as golangci-lint's govet |
+| staticcheck, U1000 | golangci-lint's `staticcheck` and `unused` |
+| errcheck, errorlint, exhaustive, gochecksumtype, depguard, revive | golangci-lint |
+| gocyclo and gocognit | Both, deliberately: cyclomatic complexity at most 8, cognitive at most 10, for adapters and the shell |
+| funlen | golangci-lint, for adapters and `cmd/` |
+| revive and staticcheck ST | Both. revive's `exported` rule enforces doc comments |
+| goimports | golangci-lint formatter |
+| golangci-lint | Pinned in `devbox.json`; `verify` checks the version |
+| gofumpt | golangci-lint formatter, in place of gofmt |
+| wrapcheck | golangci-lint. Errors from the module's own packages, and in tests, are exempt: they already carry context |
+| `go mod tidy -diff` | `verify` fails when `go.mod` or `go.sum` is untidy |
+| `go test -race` | In `go tool go-baseline test` |
+| govulncheck | In `verify`, through `golang.org/x/vuln/scan`, so its version is pinned in go-baseline's `go.mod` |
+| modernize | golangci-lint; Go is pinned, so newer idioms are always available |
+| nilness | govet analyser, which golangci-lint leaves off by default |
+| gosec | golangci-lint. G204 and G304 are excluded in `cmd/` and adapters, and gosec in tests, in the template rather than with `//nolint` |
+
+### Not adopted
+
+| Tool | Why |
+|---|---|
+| gofmt | Replaced by gofumpt, a strict superset |
+| golint | Deprecated; revive replaces it |
+| cyclop | Duplicates gocyclo and gocognit |
+| revive's function-length rule | Duplicates funlen |
+| gomodguard | `verify`'s dependency check, from `go list -deps`, is stricter |
+| go-arch-lint, arch-go | depguard, `RoleOf` and the coreboundary, portbranch and configread analysers enforce the architecture more precisely |
+| gopls modernize | Covered by golangci-lint's modernize |
+
+### Open
+
+| Tool | Question |
+|---|---|
+| nilaway | Runs outside golangci-lint and reports false positives, which the no-`//nolint` rule would force code to work around |
+| deadcode | Useful only for `command` modules; U1000 may be enough |
+| dupl | Whether duplicated code is worth a threshold, given table-driven tests |
+| goleak | Needs `goleak.VerifyTestMain` in each package, which `verify` would have to check |
+| Semgrep or CodeQL | Whether deeper security analysis is wanted beyond gosec, and as a separate workflow |
 
 ## Adding an architecture rule
 

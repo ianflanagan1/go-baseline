@@ -91,6 +91,29 @@ func TestTheGeneratedConfigBansAdaptersFromTheShellForAnyModule(t *testing.T) {
 	}
 }
 
+func TestTheGeneratedConfigRequiresWrappingOnlyOtherModulesErrors(t *testing.T) {
+	for _, kind := range []baseline.Kind{baseline.Command, baseline.PureLibrary, baseline.Adapters} {
+		config, err := baseline.GolangciConfig("example.com/app", kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(config), "ignore-package-globs:\n        - example.com/app/*\n") {
+			t.Fatalf("%s config doesn't exempt the module's own errors from wrapcheck:\n%s", kind, config)
+		}
+	}
+}
+
+func TestTheGeneratedConfigLimitsTheShellsComplexity(t *testing.T) {
+	config, err := baseline.GolangciConfig("example.com/app", baseline.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "      - path: (^|/)(cmd|internal/core)/\n        linters:\n          - gocognit\n          - gocyclo\n"
+	if !strings.Contains(string(config), want) {
+		t.Fatalf("config doesn't exempt only the core and composition root from the complexity limits:\n%s", config)
+	}
+}
+
 func TestAProjectOnTheBaselineHasNoProblems(t *testing.T) {
 	if problems := verify(t, matchingProject(t)); problems != nil {
 		t.Fatalf("got %q", problems)
