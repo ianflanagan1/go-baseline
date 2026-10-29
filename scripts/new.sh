@@ -2,7 +2,7 @@
 # Creates a Go project from go-template:
 #   devbox run new command|pure-library|adapters <module-path> <absolute-dir>
 # Devbox runs scripts from this repo's root, so <dir> must be absolute.
-set -eu
+set -o errexit -o nounset
 
 usage="usage: devbox run new command|pure-library|adapters <module-path> <absolute-dir>"
 if [ $# -ne 3 ]; then
