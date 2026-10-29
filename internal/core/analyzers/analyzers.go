@@ -33,7 +33,7 @@ type Project struct {
 
 // All returns every analyzer for p.
 func All(p Project) []*analysis.Analyzer {
-	return []*analysis.Analyzer{CoreBoundary(p), ConfigRead(p)}
+	return []*analysis.Analyzer{CoreBoundary(p), ConfigRead(p), PortBranch(p)}
 }
 
 // role returns the role of the package at importPath, and false when the

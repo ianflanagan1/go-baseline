@@ -36,7 +36,13 @@ func TestAnAdaptersModuleMayReadConfiguration(t *testing.T) {
 }
 
 func TestAllReturnsEveryAnalyzer(t *testing.T) {
-	if got := len(analyzers.All(project(baseline.Command))); got != 2 {
-		t.Fatalf("got %d analyzers, want 2", got)
+	if got := len(analyzers.All(project(baseline.Command))); got != 3 {
+		t.Fatalf("got %d analyzers, want 3", got)
 	}
+}
+
+func TestPortBranch(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), analyzers.PortBranch(project(baseline.Command)),
+		"example.com/app/internal/orders", "example.com/app/internal/notify",
+		"example.com/app/internal/core/pricing")
 }

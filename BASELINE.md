@@ -40,6 +40,24 @@ When code needs a value from an outside source, such as the time, a file or an A
 
 `verify` enforces this. Wherever code outside the core passes the core, or a pure library, a value as an interface, a function, a type argument or a variadic argument, or stores one in a core type's field, the value's concrete type must be pure: the core's own, a pure standard library type such as `*strings.Builder`, or a pure third-party type. A port, an adapter, a closure, a shell type or a slice made outside the core is reported. `error` is exempt. The linters also ban `context` from the core, because a context signals I/O.
 
+### The shell acts; the core decides
+
+The shell branches only on what the core returns and on whether an error is nil. A value read through a port (a method of an interface the core doesn't declare, or a call to a function value) goes to the core, and the shell acts on the result:
+
+```go
+resp, err := sender.Send(ctx, req)
+if err != nil { // allowed: whether the port failed
+	return fmt.Errorf("sending: %w", err)
+}
+if resp.Status == 429 { ... }     // reported: the shell decides
+switch rates.Next(resp).(type) {  // allowed: the core decides
+case rates.Retry:
+	...
+}
+```
+
+`verify` enforces this. It follows a port's value through anything computed from it outside the core, including `errors.Is`, `len`, a struct or slice it's stored in, and what a call such as `json.Unmarshal` writes through a pointer passed with it. It reports an `if`, `switch` or loop condition that depends on it, a function chosen by it, and passing it to another shell function that branches on it. Ranging over a port's value is allowed: doing the same thing for each element isn't a decision. Neither is which case of a `select` ran. Computing with a port's value without branching, such as sorting it, isn't detected, but belongs in the core too.
+
 ### What each role may do
 
 | Rule | Core | Shell | Adapter | Composition root |
