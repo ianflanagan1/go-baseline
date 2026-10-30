@@ -22,6 +22,10 @@ import (
 // the version the generated config is written for.
 const GolangciLintVersion = "2.15.0"
 
+// TaskVersion is the go-task every project pins in devbox.json, the version
+// the generated Taskfile is written for.
+const TaskVersion = "3.53.1"
+
 // MinCoreCoverage is the statement coverage, in percent, that each core
 // package's tests must reach.
 const MinCoreCoverage = 80.0
@@ -51,8 +55,7 @@ const TaskfilePath = "Taskfile.yml"
 const WorkflowPath = ".github/workflows/check.yml"
 
 var (
-	exactGo      = regexp.MustCompile(`^go@\d+\.\d+\.\d+$`)
-	exactTask    = regexp.MustCompile(`^go-task@\d+\.\d+\.\d+$`)
+	exactGo      = regexp.MustCompile(`^go@(\d+\.\d+)\.\d+$`)
 	kindLine     = regexp.MustCompile(`(?m)^# Module kind: ([a-z-]+)\.`)
 	coverageLine = regexp.MustCompile(`^(?:ok|FAIL)?\s+(\S+)\s.*coverage: ([0-9.]+)% of statements`)
 )
@@ -377,13 +380,13 @@ func Verify(p Project) ([]string, error) {
 	case !bytes.Equal(p.Taskfile, taskfile):
 		problems = append(problems, TaskfilePath+" differs from the baseline; run `go tool go-baseline write`, and put the project's own tasks in Taskfile.project.yml")
 	}
-	problems = append(problems, devboxProblems(p.Devbox)...)
+	problems = append(problems, devboxProblems(p.Devbox, p.GoMod)...)
 	problems = append(problems, layoutProblems(kind, p.Dirs)...)
 	problems = append(problems, DependencyProblems(module, kind, p.Packages)...)
 	return problems, nil
 }
 
-func devboxProblems(devbox []byte) []string {
+func devboxProblems(devbox, goMod []byte) []string {
 	if devbox == nil {
 		return []string{"devbox.json is missing"}
 	}
@@ -399,6 +402,7 @@ func devboxProblems(devbox []byte) []string {
 	}
 
 	problems := devboxPackageProblems(config.Packages)
+	problems = append(problems, goVersionProblems(config.Packages, goMod)...)
 	if config.Env["GOTOOLCHAIN"] != "local" {
 		problems = append(problems, `devbox.json must set env GOTOOLCHAIN to "local"`)
 	}
@@ -416,12 +420,45 @@ func devboxPackageProblems(packages []string) []string {
 	if !slices.Contains(packages, "golangci-lint@"+GolangciLintVersion) {
 		problems = append(problems, "devbox.json must pin golangci-lint@"+GolangciLintVersion)
 	}
-	if !slices.ContainsFunc(packages, exactTask.MatchString) {
-		problems = append(problems, "devbox.json must pin go-task, which runs the Taskfile, to an exact version, such as go-task@3.53.1")
+	if !slices.Contains(packages, "go-task@"+TaskVersion) {
+		problems = append(problems, "devbox.json must pin go-task@"+TaskVersion+", which runs the Taskfile")
 	}
 	return problems
 }
 
+// goVersionProblems reports go.mod's go line differing from the minor
+// version of the Go that devbox pins. A missing pin is reported by
+// devboxPackageProblems.
+func goVersionProblems(packages []string, goMod []byte) []string {
+	var minor string
+	for _, pkg := range packages {
+		if match := exactGo.FindStringSubmatch(pkg); match != nil {
+			minor = match[1]
+		}
+	}
+	if minor == "" {
+		return nil
+	}
+	goLine, found := goDirective(goMod)
+	if !found {
+		return []string{"go.mod has no go line; run `devbox run -- go mod edit -go=" + minor + "`"}
+	}
+	if goLine != minor && !strings.HasPrefix(goLine, minor+".") {
+		return []string{fmt.Sprintf("go.mod's go line is %s, but devbox.json pins Go %s; run `devbox run -- go mod edit -go=%s`", goLine, minor, minor)}
+	}
+	return nil
+}
+
+// goDirective returns the version on go.mod's go line, and whether it has one.
+func goDirective(goMod []byte) (string, bool) {
+	for line := range strings.Lines(string(goMod)) {
+		fields := strings.Fields(strings.SplitN(line, "//", 2)[0])
+		if len(fields) == 2 && fields[0] == "go" {
+			return fields[1], true
+		}
+	}
+	return "", false
+}
 func layoutProblems(kind Kind, dirs []string) []string {
 	var problems []string
 	for _, dir := range dirs {

@@ -13,7 +13,7 @@ import (
 const goMod = "module example.com/app\n\ngo 1.27\n"
 
 const devbox = `{
-  "packages": ["go@1.27.3", "golangci-lint@` + baseline.GolangciLintVersion + `", "go-task@3.53.1"],
+  "packages": ["go@1.27.3", "golangci-lint@` + baseline.GolangciLintVersion + `", "go-task@` + baseline.TaskVersion + `"],
   "env": {"GOTOOLCHAIN": "local"}
 }`
 
@@ -178,7 +178,7 @@ func TestAPureLibraryConfigHasNoShell(t *testing.T) {
 
 func TestAConfigForAnotherModuleIsReported(t *testing.T) {
 	p := matchingProject(t)
-	p.GoMod = []byte("module example.com/renamed\n")
+	p.GoMod = []byte("module example.com/renamed\n\ngo 1.27\n")
 	assertOneProblem(t, verify(t, p), ".golangci.yml differs")
 }
 
@@ -224,7 +224,7 @@ func TestDevboxDriftIsReported(t *testing.T) {
 		{"go pinned to a minor version", `"go@1.27.3"`, `"go@1.27"`, "pin Go"},
 		{"another golangci-lint", "golangci-lint@" + baseline.GolangciLintVersion, "golangci-lint@2.0.0", "golangci-lint@"},
 		{"toolchain downloads allowed", `"GOTOOLCHAIN": "local"`, `"GOTOOLCHAIN": "auto"`, "GOTOOLCHAIN"},
-		{"go-task not pinned", `"go-task@3.53.1"`, `"go-task@latest"`, "pin go-task"},
+		{"another go-task", "go-task@" + baseline.TaskVersion, "go-task@3.0.0", "go-task@"},
 		{"a devbox script", `"env"`, `"shell": {"scripts": {"build": "go build ./..."}}, "env"`, `script "build": move it`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -233,6 +233,38 @@ func TestDevboxDriftIsReported(t *testing.T) {
 			assertOneProblem(t, verify(t, p), tc.want)
 		})
 	}
+}
+
+func TestGoModsGoLineMustBeTheMinorVersionDevboxPins(t *testing.T) {
+	for _, tc := range []struct {
+		name, goLine string
+		agrees       bool
+	}{
+		{"the same minor version", "go 1.27", true},
+		{"a patch release of it", "go 1.27.0", true},
+		{"an older minor version", "go 1.26", false},
+		{"a newer minor version", "go 1.28", false},
+		{"a prefix of the minor version", "go 1.2", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := matchingProject(t)
+			p.GoMod = []byte(strings.Replace(goMod, "go 1.27", tc.goLine, 1))
+			problems := verify(t, p)
+			if tc.agrees {
+				if problems != nil {
+					t.Fatalf("got %q", problems)
+				}
+				return
+			}
+			assertOneProblem(t, problems, "go mod edit -go=1.27")
+		})
+	}
+}
+
+func TestAGoModWithoutAGoLineIsReported(t *testing.T) {
+	p := matchingProject(t)
+	p.GoMod = []byte("module example.com/app\n")
+	assertOneProblem(t, verify(t, p), "go.mod has no go line")
 }
 
 func TestAMissingDevboxIsReported(t *testing.T) {

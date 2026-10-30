@@ -30,7 +30,8 @@ Publish it with `github publish` from repo-tools.
 | CI: `devbox run -- task check` on each push and pull request | `.github/workflows/check.yml` | `verify`: must match byte for byte |
 | `check`, `lint`, `lint-file`, `test` and `integration` tasks, including the project's own from `Taskfile.project.yml` | `Taskfile.yml` | `verify`: must match byte for byte |
 | The architecture and conventions, with examples, for people and AI agents | `BASELINE.md`, imported by the project's `CLAUDE.md` | `verify`: must match byte for byte |
-| Go and go-task pinned to exact versions, golangci-lint pinned to the baseline's version | `devbox.json` packages | `verify` |
+| Go pinned to an exact version, golangci-lint and go-task to the baseline's versions | `devbox.json` packages | `verify` |
+| `go.mod`'s `go` line is the minor version of the Go that devbox pins | `go.mod` | `verify` |
 | `GOTOOLCHAIN=local` | `devbox.json` env | `verify` |
 | No scripts: every command is a task | `devbox.json` | `verify` |
 | Values reaching the core through interfaces, functions, fields or type arguments are pure (`coreboundary`) | code | `verify` |
@@ -111,7 +112,7 @@ golangci-lint can't extend a shared config, so a project can't add its own rules
 
 ## Changing a shared setting
 
-1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, the tasks in `internal/core/baseline/Taskfile.yml`, or the constants in `baseline.go`. To let the core and shell use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint, change `GolangciLintVersion` and the version in this repo's `devbox.json` together.
+1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, the tasks in `internal/core/baseline/Taskfile.yml`, or the constants in `baseline.go`. To let the core and shell use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint or go-task, change `GolangciLintVersion` or `TaskVersion` and the version in this repo's `devbox.json` together; this repo's own `verify` fails until they agree. Pin a GitHub Action in `check.yml` by its commit SHA, with the tag in a comment.
 2. `devbox run -- task check`, commit, then `github release . minor`.
 3. In go-template and each project:
 
