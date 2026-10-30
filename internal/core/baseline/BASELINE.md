@@ -9,6 +9,7 @@ The rules this project shares with every Go project built on go-baseline. The li
 - Run `devbox run -- task check` before finishing a change. It must pass.
 - Don't edit `.golangci.yml`, `Taskfile.yml` or this file; `verify` fails if they differ from the baseline. Put the project's own tasks in `Taskfile.project.yml`, which `Taskfile.yml` includes. A rule that's wrong for every project changes in go-baseline.
 - Don't silence a linter with `//nolint`. Restructure the code so the rule holds.
+- When a rule makes the task impossible, or rules out the solution that's clearly best, stop and ask the user to change the baseline. Say which rule, what it blocks and the change to go-baseline you'd suggest. Do the same when a check is wrong about your code. Don't contort the code to get past the check, and don't loosen the rules yourself: no editing the generated files, and no older version or `replace` of go-baseline in `go.mod`. A person changes go-baseline and releases it, and the project upgrades.
 - Run `devbox run -- go mod tidy` after changing dependencies. `verify` fails when `go.mod` is untidy, or when the code calls a function with a known vulnerability; upgrade the dependency to fix one.
 - In a `command` module, `verify` reports each function that no program in `cmd/` calls, even indirectly. A function only tests call is unreachable too. Delete code nothing runs.
 - Run tools through devbox (`devbox run -- go ...`), so the pinned Go and golangci-lint are used.
@@ -139,19 +140,24 @@ A command's composition root reads the configuration and wires the adapter in:
 package main
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "greet:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+func run(_ context.Context, args []string, stdout, _ io.Writer) error {
 	if len(args) != 1 {
 		return errors.New("usage: greet <name>")
 	}
-	return app.Greet(clock.System{}, os.Stdout, args[0])
+	return app.Greet(clock.System{}, stdout, args[0])
 }
 ```
+
+`main` only connects `run` to the process: its signals, arguments and standard streams. `run` takes the context, which an interrupt or SIGTERM cancels so a server can shut down cleanly, and returns every error for `main` to print.
 
 Tests of the shell use a fake for each port:
 
