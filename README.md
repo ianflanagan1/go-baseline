@@ -38,6 +38,7 @@ Publish it with `github publish` from repo-tools.
 | No third-party dependency of a core or shell package imports an I/O package, at any depth | `go.mod` | `verify`, from `go list -deps` |
 | `go.mod` and `go.sum` are tidy | `go.mod` | `verify`, with `go mod tidy -diff` |
 | No call reaches a function with a known vulnerability | code and `go.mod` | `verify`, with govulncheck |
+| GitHub Actions pinned by commit SHA | `.github/workflows/check.yml` | `verify`: must match byte for byte |
 | Each core package's tests cover at least 80% of its statements | tests | `test` |
 | No data races in the tests | tests | `test`, with `-race` |
 | No `src/` or `pkg/` at the root, no `util`, `common` or `helpers` package | directories | `verify` |
