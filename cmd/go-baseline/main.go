@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ianflanagan1/go-baseline/internal/adapters/gopackages"
@@ -123,7 +124,11 @@ func verify() error {
 	if err != nil {
 		return err
 	}
-	problems = append(append(problems, diagnostics...), untidy...)
+	dead, err := deadcode(p.Golangci)
+	if err != nil {
+		return err
+	}
+	problems = slices.Concat(problems, diagnostics, untidy, dead)
 	if err := report(problems, "the project differs from the baseline"); err != nil {
 		return err
 	}
@@ -177,6 +182,23 @@ func tidyProblems() ([]string, error) {
 		return nil, fmt.Errorf("go mod tidy: %w: %s", err, stderr.String())
 	}
 	return nil, nil
+}
+
+// deadcode reports the functions that no program in a command module
+// reaches. Other kinds are imported by other modules, so whatever they export
+// is in use. It runs the deadcode in the x/tools that go-baseline requires.
+func deadcode(golangci []byte) ([]string, error) {
+	if kind, err := baseline.KindOf(golangci); err != nil || kind != baseline.Command {
+		return nil, nil
+	}
+	var stdout, stderr strings.Builder
+	cmd := exec.Command("go", "run", "golang.org/x/tools/cmd/deadcode", "./...")
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("deadcode: %w: %s", err, stderr.String())
+	}
+	return baseline.DeadcodeProblems([]byte(stdout.String())), nil
 }
 
 // vulncheck runs govulncheck, which fails when the code calls a function

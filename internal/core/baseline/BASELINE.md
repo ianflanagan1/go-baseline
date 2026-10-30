@@ -10,6 +10,7 @@ The rules this project shares with every Go project built on go-baseline. The li
 - Don't edit `.golangci.yml`, `Taskfile.yml` or this file; `verify` fails if they differ from the baseline. Put the project's own tasks in `Taskfile.project.yml`, which `Taskfile.yml` includes. A rule that's wrong for every project changes in go-baseline.
 - Don't silence a linter with `//nolint`. Restructure the code so the rule holds.
 - Run `devbox run -- go mod tidy` after changing dependencies. `verify` fails when `go.mod` is untidy, or when the code calls a function with a known vulnerability; upgrade the dependency to fix one.
+- In a `command` module, `verify` reports each function that no program in `cmd/` calls, even indirectly. A function only tests call is unreachable too. Delete code nothing runs.
 - Run tools through devbox (`devbox run -- go ...`), so the pinned Go and golangci-lint are used.
 - Run `go tool go-baseline map` to see each package's role, the ports the shell declares and the adapters that implement them.
 

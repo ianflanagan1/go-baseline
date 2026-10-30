@@ -459,6 +459,7 @@ func goDirective(goMod []byte) (string, bool) {
 	}
 	return "", false
 }
+
 func layoutProblems(kind Kind, dirs []string) []string {
 	var problems []string
 	for _, dir := range dirs {
@@ -531,6 +532,18 @@ func (r reach) ioProblems() []string {
 					"%s depends on %s, which imports %s; the core and shell can't depend on I/O, even indirectly",
 					r.from[importPath], importPath, imported))
 			}
+		}
+	}
+	return problems
+}
+
+// DeadcodeProblems turns the output of deadcode, one unreachable function
+// per line, into problems.
+func DeadcodeProblems(output []byte) []string {
+	var problems []string
+	for line := range strings.Lines(string(output)) {
+		if line = strings.TrimSpace(line); line != "" {
+			problems = append(problems, line+"; no program in cmd/ calls it, even indirectly: delete it, or call it")
 		}
 	}
 	return problems

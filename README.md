@@ -39,6 +39,7 @@ Publish it with `github publish` from repo-tools.
 | No third-party dependency of a core or shell package imports an I/O package, at any depth | `go.mod` | `verify`, from `go list -deps` |
 | `go.mod` and `go.sum` are tidy | `go.mod` | `verify`, with `go mod tidy -diff` |
 | No call reaches a function with a known vulnerability | code and `go.mod` | `verify`, with govulncheck |
+| In a `command` module, every function is reachable from a program in `cmd/` | code | `verify`, with deadcode |
 | GitHub Actions pinned by commit SHA | `.github/workflows/check.yml` | `verify`: must match byte for byte |
 | Each core package's tests cover at least 80% of its statements | tests | `test` |
 | No data races in the tests | tests | `test`, with `-race` |
@@ -73,6 +74,7 @@ Decisions on the common Go analysis tools, recorded 28 October 2026. golangci-li
 | govulncheck | In `verify`, through `golang.org/x/vuln/scan`, so its version is pinned in go-baseline's `go.mod` |
 | modernize | golangci-lint; Go is pinned, so newer idioms are always available |
 | nilness | govet analyser, which golangci-lint leaves off by default |
+| deadcode | In `verify`, for `command` modules only: a library's exported API is in use by other modules. U1000 can't see that an exported function is unused. It runs from the x/tools that go-baseline's `go.mod` pins |
 | gosec | golangci-lint. G204 and G304 are excluded in `cmd/` and adapters, and gosec in tests, in the template rather than with `//nolint` |
 
 ### Not adopted
@@ -93,7 +95,6 @@ Decisions on the common Go analysis tools, recorded 28 October 2026. golangci-li
 | Tool | Question |
 |---|---|
 | nilaway | Runs outside golangci-lint and reports false positives, which the no-`//nolint` rule would force code to work around |
-| deadcode | Useful only for `command` modules; U1000 may be enough |
 | dupl | Whether duplicated code is worth a threshold, given table-driven tests |
 | goleak | Needs `goleak.VerifyTestMain` in each package, which `verify` would have to check |
 | Semgrep or CodeQL | Whether deeper security analysis is wanted beyond gosec, and as a separate workflow |

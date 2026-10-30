@@ -473,3 +473,20 @@ func TestModuleDirsListsOtherModules(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestEachUnreachableFunctionIsAProblem(t *testing.T) {
+	output := "internal/app/app.go:12:6: unreachable func: unused\n" +
+		"internal/core/rates/rates.go:30:6: unreachable func: Spare\n"
+	problems := baseline.DeadcodeProblems([]byte(output))
+	if len(problems) != 2 ||
+		!strings.HasPrefix(problems[0], "internal/app/app.go:12:6: unreachable func: unused; ") ||
+		!strings.HasPrefix(problems[1], "internal/core/rates/rates.go:30:6: unreachable func: Spare; ") {
+		t.Fatalf("got %q", problems)
+	}
+}
+
+func TestNoUnreachableFunctionsIsNoProblems(t *testing.T) {
+	if problems := baseline.DeadcodeProblems(nil); problems != nil {
+		t.Fatalf("got %q", problems)
+	}
+}
