@@ -4,19 +4,21 @@ The settings every Go project shares, and the command that keeps a project on th
 
 ## Starting a project
 
-From this repo, with the module kind: `command`, `pure-library` (no I/O; every package is core) or `adapters` (shared driven adapters, such as go-adapters):
+From this repo, for an application:
 
 ```sh
-devbox run -- task new KIND=<kind> MODULE=github.com/ianflanagan1/<name> DIR=~/projects-ianf/<category>/<name>
+devbox run -- task new MODULE=github.com/ianflanagan1/<name> DIR=~/projects-ianf/<category>/<name>
 ```
+
+or, for a library, `task new-library` with the same variables.
 
 The directory must be an absolute path, because devbox runs tasks from this repo's root. The task, in `Taskfile.project.yml`:
 
 1. copies go-template with `gonew`, rewriting the module path in `go.mod` and every import;
-2. for a command, renames `cmd/app` to `cmd/<name>`; otherwise removes `cmd/` and go-template's `Taskfile.project.yml`, with its `build` task, and adds a root `doc.go`, its package named for the module without a `go-` prefix;
-3. writes a README skeleton for the kind, and removes the licence, so you choose one;
+2. for an application, renames `cmd/app` to `cmd/<name>`; for a library, removes `cmd/` and go-template's `Taskfile.project.yml`, with its `build` task, and adds `core/<package>/doc.go`, its package named for the module without a `go-` prefix;
+3. writes a README skeleton, and removes the licence, so you choose one;
 4. upgrades go-baseline to its latest release, so a project never starts on an old baseline;
-5. generates `.golangci.yml`, which records the module kind, `BASELINE.md`, the CI workflow and `Taskfile.yml` for the new module;
+5. generates `.golangci.yml`, `BASELINE.md`, the CI workflow and `Taskfile.yml` for the new module;
 6. runs `devbox run -- task check`;
 7. creates a git repo on `main` with one commit.
 
@@ -39,7 +41,8 @@ Publish it with `github publish` from repo-tools.
 | No third-party dependency of a core or orchestrator package imports an I/O package, at any depth | `go.mod` | `verify`, from `go list -deps` |
 | `go.mod` and `go.sum` are tidy | `go.mod` | `verify`, with `go mod tidy -diff` |
 | No call reaches a function with a known vulnerability | code and `go.mod` | `verify`, with govulncheck |
-| In a `command` module, every function is reachable from a program in `cmd/` | code | `verify`, with deadcode |
+| In an application, every function is reachable from a program in `cmd/` | code | `verify`, with deadcode |
+| An application's packages, other than `cmd/`, are under `internal/`; a library's adapters import only the standard library and the library's own packages, unless it holds only adapters | directories and code | `verify`, from `go list` |
 | GitHub Actions pinned by commit SHA | `.github/workflows/check.yml` | `verify`: must match byte for byte |
 | Each core package's tests cover at least 80% of its statements | tests | `test` |
 | No data races in the tests | tests | `test`, with `-race` |
@@ -74,7 +77,7 @@ Decisions on the common Go analysis tools, recorded 28 October 2026. golangci-li
 | govulncheck | In `verify`, through `golang.org/x/vuln/scan`, so its version is pinned in go-baseline's `go.mod` |
 | modernize | golangci-lint; Go is pinned, so newer idioms are always available |
 | nilness | govet analyser, which golangci-lint leaves off by default |
-| deadcode | In `verify`, for `command` modules only: a library's exported API is in use by other modules. U1000 can't see that an exported function is unused. It runs from the x/tools that go-baseline's `go.mod` pins |
+| deadcode | In `verify`, for applications only: a library's exported API is in use by other modules. U1000 can't see that an exported function is unused. It runs from the x/tools that go-baseline's `go.mod` pins |
 | gosec | golangci-lint. G204 and G304 are excluded in `cmd/` and adapters, and gosec in tests, in the template rather than with `//nolint` |
 
 ### Not adopted
@@ -144,7 +147,7 @@ When a check changes what it enforces, or the baseline moves to a new rulebook r
 
 | Command | What it does |
 |---|---|
-| `go tool go-baseline write [-kind <kind>]` | Writes `.golangci.yml` for the module in `go.mod` and the module kind (by default, the kind it already records), `BASELINE.md` and `.github/workflows/check.yml` |
+| `go tool go-baseline write` | Writes `.golangci.yml` for the module in `go.mod`, `BASELINE.md` and `.github/workflows/check.yml` |
 | `go tool go-baseline verify` | Lists each way the project differs from the baseline, including I/O dependencies of the core and orchestrators, packages with no role and the analyzers' findings, and fails if there are any |
 | `go tool go-baseline test` | Runs the tests with coverage, and fails if a core package is below 80% |
 | `go tool go-baseline map` | Lists each package's role, the ports the orchestrators declare and the driven adapters that implement them |

@@ -31,11 +31,11 @@ type Package struct {
 // Describe describes the project's packages, pkgs. Implementations are
 // looked for in the project's driven adapters and in the third-party packages
 // its entrypoints and driven adapters import.
-func Describe(module string, kind baseline.Kind, pkgs []*types.Package) []Package {
-	candidates := adapterTypes(module, kind, pkgs)
+func Describe(module string, pkgs []*types.Package) []Package {
+	candidates := adapterTypes(module, pkgs)
 	described := make([]Package, 0, len(pkgs))
 	for _, pkg := range pkgs {
-		role, ok := roleOf(module, kind, pkg)
+		role, ok := roleOf(module, pkg)
 		d := Package{Path: pkg.Path(), Role: role, HasRole: ok}
 		if ok && role == baseline.Orchestrator {
 			d.Ports = ports(pkg, candidates)
@@ -47,7 +47,7 @@ func Describe(module string, kind baseline.Kind, pkgs []*types.Package) []Packag
 }
 
 // Format lays out packages as a table for a terminal.
-func Format(kind baseline.Kind, packages []Package) string {
+func Format(packages []Package) string {
 	var rows [][2]string
 	for _, p := range packages {
 		role := "no role: move it to adapters/driving/ or adapters/driven/"
@@ -68,24 +68,23 @@ func Format(kind baseline.Kind, packages []Package) string {
 		width = max(width, len(row[0]))
 	}
 	var out strings.Builder
-	fmt.Fprintf(&out, "Module kind: %s\n\n", kind)
 	for _, row := range rows {
 		fmt.Fprintf(&out, "%-*s  %s\n", width, row[0], row[1])
 	}
 	return out.String()
 }
 
-func roleOf(module string, kind baseline.Kind, pkg *types.Package) (baseline.Role, bool) {
-	return baseline.RoleOf(kind, strings.TrimPrefix(strings.TrimPrefix(pkg.Path(), module), "/"))
+func roleOf(module string, pkg *types.Package) (baseline.Role, bool) {
+	return baseline.RoleOf(strings.TrimPrefix(strings.TrimPrefix(pkg.Path(), module), "/"))
 }
 
 // adapterTypes returns the named types that may implement a port: those in
 // the project's driven adapters, and in the third-party packages that its
 // entrypoints and driven adapters import.
-func adapterTypes(module string, kind baseline.Kind, pkgs []*types.Package) []*types.TypeName {
+func adapterTypes(module string, pkgs []*types.Package) []*types.TypeName {
 	var sources []*types.Package
 	for _, pkg := range pkgs {
-		role, ok := roleOf(module, kind, pkg)
+		role, ok := roleOf(module, pkg)
 		if !ok {
 			continue
 		}

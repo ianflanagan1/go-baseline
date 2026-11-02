@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -29,7 +28,7 @@ import (
 	"golang.org/x/vuln/scan"
 )
 
-const usage = "usage: go-baseline write [-kind command|pure-library|adapters] | verify | test | map | rulebook"
+const usage = "usage: go-baseline write | verify | test | map | rulebook"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -42,7 +41,9 @@ func run(args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "write":
-			return write(args[1:])
+			if len(args) == 1 {
+				return write()
+			}
 		case "verify":
 			if len(args) == 1 {
 				return verify()
@@ -64,23 +65,13 @@ func run(args []string) error {
 	return errors.New(usage)
 }
 
-// write generates .golangci.yml, BASELINE.md, the CI workflow and the Taskfile. Without -kind, it keeps the
-// kind the existing .golangci.yml records.
-func write(args []string) error {
-	flags := flag.NewFlagSet("write", flag.ContinueOnError)
-	kindFlag := flags.String("kind", "", "command, pure-library or adapters")
-	if err := flags.Parse(args); err != nil {
-		return fmt.Errorf("parsing the write flags: %w", err)
-	}
+// write generates .golangci.yml, BASELINE.md, the CI workflow and the Taskfile.
+func write() error {
 	module, err := readModule()
 	if err != nil {
 		return err
 	}
-	kind, err := chooseKind(*kindFlag)
-	if err != nil {
-		return err
-	}
-	config, err := baseline.GolangciConfig(module, kind)
+	config, err := baseline.GolangciConfig(module)
 	if err != nil {
 		return err
 	}
@@ -102,17 +93,6 @@ func write(args []string) error {
 	return nil
 }
 
-func chooseKind(flagValue string) (baseline.Kind, error) {
-	if flagValue != "" {
-		return baseline.ParseKind(flagValue)
-	}
-	golangci, err := readOptional(".golangci.yml")
-	if err != nil {
-		return "", err
-	}
-	return baseline.KindOf(golangci)
-}
-
 func verify() error {
 	p, err := readProject()
 	if err != nil {
@@ -130,7 +110,7 @@ func verify() error {
 	if err != nil {
 		return err
 	}
-	dead, err := deadcode(p.Golangci)
+	dead, err := deadcode(p)
 	if err != nil {
 		return err
 	}
@@ -190,11 +170,15 @@ func tidyProblems() ([]string, error) {
 	return nil, nil
 }
 
-// deadcode reports the functions that no program in a command module
-// reaches. Other kinds are imported by other modules, so whatever they export
-// is in use. It runs the deadcode in the x/tools that go-baseline requires.
-func deadcode(golangci []byte) ([]string, error) {
-	if kind, err := baseline.KindOf(golangci); err != nil || kind != baseline.Command {
+// deadcode reports the functions that no program in an application
+// reaches. A library is imported by other modules, so whatever it exports is
+// in use. It runs the deadcode in the x/tools that go-baseline requires.
+func deadcode(p baseline.Project) ([]string, error) {
+	module, err := baseline.ModulePath(p.GoMod)
+	if err != nil {
+		return nil, err
+	}
+	if !baseline.IsApplication(module, p.Packages) {
 		return nil, nil
 	}
 	var stdout, stderr strings.Builder
@@ -222,40 +206,34 @@ func vulncheck() error {
 	return nil
 }
 
-// analyse runs the architecture analyzers. When the kind is missing, Verify
-// has already reported it, and there's nothing to analyse against.
+// analyse runs the architecture analyzers.
 func analyse(p baseline.Project) ([]string, error) {
 	module, err := baseline.ModulePath(p.GoMod)
 	if err != nil {
 		return nil, err
 	}
-	kind, kindErr := baseline.KindOf(p.Golangci)
-	if kindErr != nil {
-		// Verify has reported it.
-		return nil, nil
-	}
-	pure, err := pureModules(baseline.ModuleDirs(module, p.Packages))
+	onBaseline, err := baselineModules(baseline.ModuleDirs(module, p.Packages))
 	if err != nil {
 		return nil, err
 	}
-	project := analyzers.Project{Module: module, Kind: kind, Impure: baseline.ImpurePackages(module, p.Packages), PureModules: pure}
+	project := analyzers.Project{Module: module, Impure: baseline.ImpurePackages(module, p.Packages), BaselineModules: onBaseline}
 	return gopackages.Analyze(".", analyzers.All(project))
 }
 
-// pureModules returns the modules, from their directories, whose
-// .golangci.yml records the pure-library module kind.
-func pureModules(dirs map[string]string) (map[string]bool, error) {
-	pure := map[string]bool{}
+// baselineModules returns the modules, from their directories, whose
+// .golangci.yml go-baseline generated.
+func baselineModules(dirs map[string]string) (map[string]bool, error) {
+	onBaseline := map[string]bool{}
 	for module, dir := range dirs {
 		golangci, err := readOptional(filepath.Join(dir, ".golangci.yml"))
 		if err != nil {
 			return nil, err
 		}
-		if kind, err := baseline.KindOf(golangci); err == nil && kind == baseline.PureLibrary {
-			pure[module] = true
+		if baseline.IsGenerated(golangci) {
+			onBaseline[module] = true
 		}
 	}
-	return pure, nil
+	return onBaseline, nil
 }
 
 // describe prints each package's role, and the ports the shell declares
@@ -265,33 +243,17 @@ func describe() error {
 	if err != nil {
 		return err
 	}
-	golangci, err := readOptional(".golangci.yml")
-	if err != nil {
-		return err
-	}
-	kind, err := baseline.KindOf(golangci)
-	if err != nil {
-		return err
-	}
 	pkgs, err := gopackages.Types(".")
 	if err != nil {
 		return err
 	}
-	fmt.Print(projectmap.Format(kind, projectmap.Describe(module, kind, pkgs)))
+	fmt.Print(projectmap.Format(projectmap.Describe(module, pkgs)))
 	return nil
 }
 
 // test runs the tests with coverage and the race detector, then checks the core's coverage.
 func test() error {
 	module, err := readModule()
-	if err != nil {
-		return err
-	}
-	golangci, err := readOptional(".golangci.yml")
-	if err != nil {
-		return err
-	}
-	kind, err := baseline.KindOf(golangci)
 	if err != nil {
 		return err
 	}
@@ -306,7 +268,7 @@ func test() error {
 	if err != nil {
 		return err
 	}
-	return report(baseline.CoverageProblems(module, kind, packages, baseline.ParseCoverage(output.Bytes())),
+	return report(baseline.CoverageProblems(module, packages, baseline.ParseCoverage(output.Bytes())),
 		"the core's tests don't cover enough of it")
 }
 

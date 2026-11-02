@@ -4,7 +4,8 @@ import (
 	"strings"
 
 	"example.com/app/internal/core/rates"
-	"example.com/ratelib"
+	"example.com/ratelib/core/ratelib"
+	"example.com/ratelib/schedule"
 	"example.com/sdk"
 )
 
@@ -36,6 +37,7 @@ func Variadic(clock Clock, shapes []rates.Shape) {
 	rates.Total(shapes...)                    // want `slice of .*Shape made outside the core`
 	rates.Total()
 	ratelib.Late(clock) // want `concrete type isn't known`
+	schedule.Late(clock)
 }
 
 func NewService(clock Clock) rates.Service {

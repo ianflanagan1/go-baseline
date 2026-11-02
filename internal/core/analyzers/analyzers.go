@@ -13,22 +13,22 @@ import (
 	"github.com/ianflanagan1/go-baseline/internal/core/baseline"
 )
 
-// EnvAdapter is the shared adapter for the process environment, which only a
+// EnvAdapter is the shared adapter for the process environment, which only an
 // entrypoint may use.
-const EnvAdapter = "github.com/ianflanagan1/go-adapters/env"
+const EnvAdapter = "github.com/ianflanagan1/go-adapters/adapters/driven/env"
 
 // Project is what the analyzers need to know about the project under
 // analysis.
 type Project struct {
 	Module string
-	Kind   baseline.Kind
 	// Impure lists the third-party packages that do I/O, from
 	// baseline.ImpurePackages.
 	Impure map[string]bool
-	// PureModules lists the other modules whose module kind is pure-library.
-	// Their packages count as core: what the project passes them is checked
-	// as if they were its own core.
-	PureModules map[string]bool
+	// BaselineModules lists the other modules on go-baseline. Their
+	// directories give their packages roles, as the project's own do, and
+	// their core counts as core: what the project passes it is checked as if
+	// it were the project's own core.
+	BaselineModules map[string]bool
 }
 
 // All returns every analyzer for p.
@@ -41,9 +41,9 @@ func All(p Project) []*analysis.Analyzer {
 func (p Project) role(importPath string) (baseline.Role, bool) {
 	switch {
 	case importPath == p.Module:
-		return baseline.RoleOf(p.Kind, "")
+		return baseline.RoleOf("")
 	case strings.HasPrefix(importPath, p.Module+"/"):
-		return baseline.RoleOf(p.Kind, strings.TrimPrefix(importPath, p.Module+"/"))
+		return baseline.RoleOf(strings.TrimPrefix(importPath, p.Module+"/"))
 	default:
 		return 0, false
 	}
@@ -56,9 +56,10 @@ func (p Project) isCore(pkg *types.Package) bool {
 	if role, own := p.role(pkg.Path()); own {
 		return role == baseline.Core
 	}
-	for module := range p.PureModules {
-		if pkg.Path() == module || strings.HasPrefix(pkg.Path(), module+"/") {
-			return true
+	for module := range p.BaselineModules {
+		if dir, ok := strings.CutPrefix(pkg.Path(), module+"/"); ok {
+			role, _ := baseline.RoleOf(dir)
+			return role == baseline.Core
 		}
 	}
 	return false

@@ -49,7 +49,7 @@ func check(t *testing.T) []*types.Package {
 }
 
 func TestPortsAreMatchedToAdaptersAndThirdPartyTypes(t *testing.T) {
-	described := projectmap.Describe("example.com/app", baseline.Command, check(t))
+	described := projectmap.Describe("example.com/app", check(t))
 	want := []projectmap.Package{
 		{Path: "example.com/app/cmd/app", Role: baseline.Entrypoint, HasRole: true},
 		{Path: "example.com/app/internal/adapters/driven/clock", Role: baseline.DrivenAdapter, HasRole: true},
@@ -59,14 +59,14 @@ func TestPortsAreMatchedToAdaptersAndThirdPartyTypes(t *testing.T) {
 			{Name: "Store"},
 		}},
 	}
-	if got, wantText := projectmap.Format(baseline.Command, described), projectmap.Format(baseline.Command, want); got != wantText {
+	if got, wantText := projectmap.Format(described), projectmap.Format(want); got != wantText {
 		t.Fatalf("got\n%s\nwant\n%s", got, wantText)
 	}
 }
 
 func TestTheFormatShowsRolesAndMissingImplementations(t *testing.T) {
-	got := projectmap.Format(baseline.Command, projectmap.Describe("example.com/app", baseline.Command, check(t)))
-	for _, want := range []string{"Module kind: command\n", "example.com/app/cmd/app", "entrypoint", "port Store", "no implementation found"} {
+	got := projectmap.Format(projectmap.Describe("example.com/app", check(t)))
+	for _, want := range []string{"example.com/app/cmd/app", "entrypoint", "port Store", "no implementation found"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("got\n%s\nwant it to contain %q", got, want)
 		}
@@ -74,7 +74,7 @@ func TestTheFormatShowsRolesAndMissingImplementations(t *testing.T) {
 }
 
 func TestAPackageWithNoRoleIsShownAsOne(t *testing.T) {
-	got := projectmap.Format(baseline.Command, []projectmap.Package{{Path: "example.com/app/internal/adapters/clock"}})
+	got := projectmap.Format([]projectmap.Package{{Path: "example.com/app/internal/adapters/clock"}})
 	if !strings.Contains(got, "example.com/app/internal/adapters/clock  no role: move it to adapters/driving/ or adapters/driven/") {
 		t.Errorf("got\n%s", got)
 	}

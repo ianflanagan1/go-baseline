@@ -19,7 +19,7 @@ const devbox = `{
 
 func matchingProject(t *testing.T) baseline.Project {
 	t.Helper()
-	golangci, err := baseline.GolangciConfig("example.com/app", baseline.Command)
+	golangci, err := baseline.GolangciConfig("example.com/app")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestAGoModWithoutAModuleLineIsAnError(t *testing.T) {
 }
 
 func TestTheGeneratedConfigBansAdaptersFromOrchestratorsByModulePath(t *testing.T) {
-	config, err := baseline.GolangciConfig("example.com/app", baseline.Command)
+	config, err := baseline.GolangciConfig("example.com/app")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,51 +74,50 @@ func TestTheGeneratedConfigBansAdaptersFromOrchestratorsByModulePath(t *testing.
 	}
 }
 
-func TestTheGeneratedConfigBansAdaptersFromOrchestratorsForAnyModule(t *testing.T) {
-	config, err := baseline.GolangciConfig("example.com/lib", baseline.Command)
+func TestTheGeneratedConfigBansAdaptersAtTheModuleRootFromOrchestrators(t *testing.T) {
+	config, err := baseline.GolangciConfig("example.com/lib")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(config), "- pkg: example.com/lib/internal/adapters\n") {
+	if !strings.Contains(string(config), "- pkg: example.com/lib/adapters\n") {
 		t.Fatalf("config doesn't deny the module's adapters:\n%s", config)
 	}
 }
 
 func TestTheGeneratedConfigRequiresWrappingOnlyOtherModulesErrors(t *testing.T) {
-	for _, kind := range []baseline.Kind{baseline.Command, baseline.PureLibrary, baseline.Adapters} {
-		config, err := baseline.GolangciConfig("example.com/app", kind)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(config), "ignore-package-globs:\n        - example.com/app/*\n") {
-			t.Fatalf("%s config doesn't exempt the module's own errors from wrapcheck:\n%s", kind, config)
-		}
+	config, err := baseline.GolangciConfig("example.com/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(config), "ignore-package-globs:\n        - example.com/app/*\n") {
+		t.Fatalf("config doesn't exempt the module's own errors from wrapcheck:\n%s", config)
 	}
 }
 
 func TestTheGeneratedConfigLimitsTheComplexityOfEveryPackageButTheEntrypoint(t *testing.T) {
-	cmdExemption := "      - path: (^|/)cmd/\n        linters:\n          - gocognit\n"
-	for _, tc := range []struct {
-		kind baseline.Kind
-		// Besides enabling gocognit and exempting tests.
-		exemptions int
-	}{
-		{baseline.Command, 1},
-		{baseline.PureLibrary, 0},
-		{baseline.Adapters, 0},
-	} {
-		t.Run(string(tc.kind), func(t *testing.T) {
-			config, err := baseline.GolangciConfig("example.com/app", tc.kind)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := strings.Count(string(config), "- gocognit\n") - 2; got != tc.exemptions {
-				t.Fatalf("got %d gocognit exemptions besides tests, want %d:\n%s", got, tc.exemptions, config)
-			}
-			if tc.exemptions == 1 && !strings.Contains(string(config), cmdExemption) {
-				t.Fatalf("config doesn't exempt only the entrypoint:\n%s", config)
-			}
-		})
+	config, err := baseline.GolangciConfig("example.com/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Besides enabling gocognit and exempting tests.
+	if got := strings.Count(string(config), "- gocognit\n") - 2; got != 1 {
+		t.Fatalf("got %d gocognit exemptions besides tests, want 1:\n%s", got, config)
+	}
+	if !strings.Contains(string(config), "      - path: (^|/)cmd/\n        linters:\n          - gocognit\n") {
+		t.Fatalf("config doesn't exempt only the entrypoint:\n%s", config)
+	}
+}
+
+func TestTheGeneratedConfigIsRecognisedAsTheBaselines(t *testing.T) {
+	config, err := baseline.GolangciConfig("example.com/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !baseline.IsGenerated(config) {
+		t.Fatalf("config isn't recognised:\n%s", config)
+	}
+	if baseline.IsGenerated([]byte("version: \"2\"\n")) {
+		t.Fatal("a config of the project's own is recognised")
 	}
 }
 
@@ -138,42 +137,6 @@ func TestAMissingConfigIsReported(t *testing.T) {
 	p := matchingProject(t)
 	p.Golangci = nil
 	assertOneProblem(t, verify(t, p), ".golangci.yml is missing")
-}
-
-func TestAConfigWithoutAKindIsReported(t *testing.T) {
-	p := matchingProject(t)
-	p.Golangci = []byte("version: \"2\"\n")
-	assertOneProblem(t, verify(t, p), "kind")
-}
-
-func TestTheConfigRecordsItsKind(t *testing.T) {
-	for _, kind := range []baseline.Kind{baseline.Command, baseline.PureLibrary, baseline.Adapters} {
-		t.Run(string(kind), func(t *testing.T) {
-			config, err := baseline.GolangciConfig("example.com/app", kind)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got, err := baseline.KindOf(config); err != nil || got != kind {
-				t.Fatalf("got %q, %v; want %q", got, err, kind)
-			}
-		})
-	}
-}
-
-func TestAnUnknownKindIsAnError(t *testing.T) {
-	if _, err := baseline.ParseKind("library"); err == nil {
-		t.Fatal("got no error")
-	}
-}
-
-func TestAPureLibraryConfigHasNoOrchestratorRules(t *testing.T) {
-	config, err := baseline.GolangciConfig("example.com/lib", baseline.PureLibrary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(config), "orchestrators:") || !strings.Contains(string(config), "- pkg: context\n") {
-		t.Fatalf("want only core rules, including no context:\n%s", config)
-	}
 }
 
 func TestAConfigForAnotherModuleIsReported(t *testing.T) {
@@ -212,7 +175,7 @@ func TestAMissingGuideIsReported(t *testing.T) {
 
 func TestALibraryLayoutHasNoProblems(t *testing.T) {
 	p := matchingProject(t)
-	p.Dirs = []string{"adapters", "adapters/clock", "internal", "internal/core", "internal/core/rates"}
+	p.Dirs = []string{"adapters", "adapters/driven", "adapters/driven/clock", "core", "core/rates"}
 	if problems := verify(t, p); problems != nil {
 		t.Fatalf("got %q", problems)
 	}
@@ -283,45 +246,58 @@ func TestDirectoriesTheLayoutGuideRulesOutAreReported(t *testing.T) {
 	}
 }
 
-func TestAPureLibraryCantHaveAdaptersOrCommands(t *testing.T) {
-	for _, dir := range []string{"adapters", "cmd"} {
+// own returns a package of example.com/app at dir, importing imports.
+func own(dir string, imports ...string) baseline.Package {
+	return baseline.Package{
+		ImportPath: strings.TrimSuffix("example.com/app/"+dir, "/"),
+		Imports:    imports,
+		Module:     &struct{ Path, Dir string }{Path: "example.com/app"},
+	}
+}
+
+func TestAModuleWithAnEntrypointIsAnApplication(t *testing.T) {
+	if !baseline.IsApplication("example.com/app", []baseline.Package{own("cmd/app"), own("internal/core/rates")}) {
+		t.Fatal("a module with cmd/app isn't an application")
+	}
+	if baseline.IsApplication("example.com/app", []baseline.Package{own("core/rates"), own("adapters/driven/clock")}) {
+		t.Fatal("a module without an entrypoint is an application")
+	}
+}
+
+func TestAnApplicationsPackagesOutsideInternalAreReported(t *testing.T) {
+	for _, dir := range []string{"", "core/rates", "adapters/driven/clock", "app"} {
 		t.Run(dir, func(t *testing.T) {
-			p := matchingProject(t)
-			config, err := baseline.GolangciConfig("example.com/app", baseline.PureLibrary)
-			if err != nil {
-				t.Fatal(err)
-			}
-			p.Golangci = config
-			p.Dirs = []string{dir}
-			assertOneProblem(t, verify(t, p), "pure library")
+			problems := baseline.ReleaseUnitProblems("example.com/app", []baseline.Package{
+				own("cmd/app"), own("internal/core/rates"), own(dir),
+			})
+			assertOneProblem(t, problems, "move the package under internal/")
 		})
 	}
 }
 
-func TestAnAdaptersConfigLimitsSizeEverywhereAndHasNoPurityRules(t *testing.T) {
-	config, err := baseline.GolangciConfig("example.com/adapters", baseline.Adapters)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, unwanted := range []string{"\n    - depguard\n", "\n    - forbidigo\n", "forbidigo:", "path-except"} {
-		if strings.Contains(string(config), unwanted) {
-			t.Errorf("config contains %q:\n%s", unwanted, config)
-		}
+func TestALibraryMayKeepAnyRoleOutsideInternal(t *testing.T) {
+	problems := baseline.ReleaseUnitProblems("example.com/app", []baseline.Package{
+		own("core/rates"), own("rates"), own("adapters/driven/clock", "time"),
+	})
+	if problems != nil {
+		t.Fatalf("got %q", problems)
 	}
 }
 
-func TestAnAdaptersModuleCantHaveCommandsOrACore(t *testing.T) {
-	for _, dir := range []string{"cmd", "internal/core"} {
-		t.Run(dir, func(t *testing.T) {
-			p := matchingProject(t)
-			config, err := baseline.GolangciConfig("example.com/app", baseline.Adapters)
-			if err != nil {
-				t.Fatal(err)
-			}
-			p.Golangci = config
-			p.Dirs = []string{dir}
-			assertOneProblem(t, verify(t, p), "adapters module")
-		})
+func TestALibrarysAdaptersUseOnlyTheStandardLibraryAndItsOwnPackages(t *testing.T) {
+	problems := baseline.ReleaseUnitProblems("example.com/app", []baseline.Package{
+		own("core/rates"),
+		own("adapters/driven/store", "database/sql", "example.com/app/core/rates", "example.com/pgx"),
+	})
+	assertOneProblem(t, problems, "example.com/app/adapters/driven/store imports example.com/pgx")
+}
+
+func TestALibraryOfOnlyAdaptersMayUseAnyLibrary(t *testing.T) {
+	problems := baseline.ReleaseUnitProblems("example.com/app", []baseline.Package{
+		own("adapters/driven/store", "example.com/pgx"), own("adapters/driving/server", "example.com/router"),
+	})
+	if problems != nil {
+		t.Fatalf("got %q", problems)
 	}
 }
 
@@ -342,25 +318,22 @@ func assertOneProblem(t *testing.T, problems []string, want string) {
 
 func TestRolesFollowThePath(t *testing.T) {
 	for _, tc := range []struct {
-		kind baseline.Kind
 		dir  string
 		want baseline.Role
 	}{
-		{baseline.Command, "internal/core/greeting", baseline.Core},
-		{baseline.Command, "internal/app", baseline.Orchestrator},
-		{baseline.Command, "", baseline.Orchestrator},
-		{baseline.Command, "internal/adapters/driving/httpapi", baseline.DrivingAdapter},
-		{baseline.Command, "internal/adapters/driven/clock", baseline.DrivenAdapter},
-		{baseline.Command, "adapters/driven/clock", baseline.DrivenAdapter},
-		{baseline.Command, "cmd/app", baseline.Entrypoint},
-		{baseline.Command, "internal/corefake", baseline.Orchestrator},
-		{baseline.PureLibrary, "", baseline.Core},
-		{baseline.PureLibrary, "parse", baseline.Core},
-		{baseline.Adapters, "", baseline.DrivenAdapter},
-		{baseline.Adapters, "clock", baseline.DrivenAdapter},
+		{"internal/core/greeting", baseline.Core},
+		{"core/parse", baseline.Core},
+		{"internal/app", baseline.Orchestrator},
+		{"", baseline.Orchestrator},
+		{"parse", baseline.Orchestrator},
+		{"internal/adapters/driving/httpapi", baseline.DrivingAdapter},
+		{"internal/adapters/driven/clock", baseline.DrivenAdapter},
+		{"adapters/driven/clock", baseline.DrivenAdapter},
+		{"cmd/app", baseline.Entrypoint},
+		{"internal/corefake", baseline.Orchestrator},
 	} {
-		t.Run(string(tc.kind)+":"+tc.dir, func(t *testing.T) {
-			if got, ok := baseline.RoleOf(tc.kind, tc.dir); !ok || got != tc.want {
+		t.Run(tc.dir, func(t *testing.T) {
+			if got, ok := baseline.RoleOf(tc.dir); !ok || got != tc.want {
 				t.Fatalf("got %v, %t, want %v", got, ok, tc.want)
 			}
 		})
@@ -370,7 +343,7 @@ func TestRolesFollowThePath(t *testing.T) {
 func TestAnAdapterInNeitherDrivingNorDrivenHasNoRole(t *testing.T) {
 	for _, dir := range []string{"internal/adapters", "internal/adapters/clock", "internal/adapters/clock/driven"} {
 		t.Run(dir, func(t *testing.T) {
-			if got, ok := baseline.RoleOf(baseline.Command, dir); ok {
+			if got, ok := baseline.RoleOf(dir); ok {
 				t.Fatalf("got %v, want no role", got)
 			}
 		})
@@ -378,11 +351,8 @@ func TestAnAdapterInNeitherDrivingNorDrivenHasNoRole(t *testing.T) {
 }
 
 func TestAPackageWithNoRoleIsReported(t *testing.T) {
-	own := func(path string) baseline.Package {
-		return baseline.Package{ImportPath: path, Module: &struct{ Path, Dir string }{Path: "example.com/app"}}
-	}
-	problems := baseline.RolelessProblems("example.com/app", baseline.Command, []baseline.Package{
-		own("example.com/app/internal/adapters/clock"), own("example.com/app/internal/adapters/driven/store"),
+	problems := baseline.RolelessProblems("example.com/app", []baseline.Package{
+		own("internal/adapters/clock"), own("internal/adapters/driven/store"),
 	})
 	assertOneProblem(t, problems, "example.com/app/internal/adapters/clock has no role; move it to adapters/driving/")
 }
@@ -398,7 +368,7 @@ func TestRolesHaveNames(t *testing.T) {
 	}
 }
 
-// goList is `go list -deps -json` output for a command whose core reaches a
+// goList is `go list -deps -json` output for an application whose core reaches a
 // third-party package that does I/O through another one, and whose adapter
 // uses an I/O package directly.
 const goList = `{"ImportPath": "os", "Standard": true}
@@ -410,6 +380,7 @@ const goList = `{"ImportPath": "os", "Standard": true}
 {"ImportPath": "example.com/app/internal/core/rates", "Imports": ["example.com/mid", "example.com/pure", "fmt"], "Module": {"Path": "example.com/app"}}
 {"ImportPath": "example.com/app/internal/app", "Imports": ["example.com/app/internal/core/rates"], "Module": {"Path": "example.com/app"}}
 {"ImportPath": "example.com/app/internal/adapters/driven/store", "Imports": ["example.com/sdk", "os"], "Module": {"Path": "example.com/app"}}
+{"ImportPath": "example.com/app/cmd/app", "Imports": ["example.com/app/internal/app", "example.com/app/internal/adapters/driven/store"], "Module": {"Path": "example.com/app"}}
 `
 
 func parsedGoList(t *testing.T) []baseline.Package {
@@ -422,7 +393,7 @@ func parsedGoList(t *testing.T) []baseline.Package {
 }
 
 func TestIODependenciesOfTheCoreAreReportedEvenIndirectly(t *testing.T) {
-	problems := baseline.DependencyProblems("example.com/app", baseline.Command, parsedGoList(t))
+	problems := baseline.DependencyProblems("example.com/app", parsedGoList(t))
 	want := "example.com/app/internal/core/rates depends on example.com/leaf, which imports net/http"
 	if len(problems) != 1 || !strings.HasPrefix(problems[0], want) {
 		t.Fatalf("got %q, want one problem starting %q", problems, want)
@@ -467,7 +438,7 @@ func TestOnlyCorePackagesBelowTheMinimumAreReported(t *testing.T) {
 		p.Module = &struct{ Path, Dir string }{"example.com/app", ""}
 		packages = append(packages, p)
 	}
-	problems := baseline.CoverageProblems("example.com/app", baseline.Command, packages, baseline.ParseCoverage([]byte(goTestOutput)))
+	problems := baseline.CoverageProblems("example.com/app", packages, baseline.ParseCoverage([]byte(goTestOutput)))
 	if len(problems) != 2 || !strings.Contains(problems[0], "core/thin") || !strings.Contains(problems[1], "core/untested") {
 		t.Fatalf("got %q, want core/thin and core/untested", problems)
 	}

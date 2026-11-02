@@ -8,7 +8,6 @@ import (
 
 	"github.com/ianflanagan1/go-baseline/internal/adapters/driven/gopackages"
 	"github.com/ianflanagan1/go-baseline/internal/core/analyzers"
-	"github.com/ianflanagan1/go-baseline/internal/core/baseline"
 )
 
 // module writes a module to a temporary directory, from file names and
@@ -33,7 +32,7 @@ func TestDiagnosticsAreReportedRelativeToTheModule(t *testing.T) {
 	dir := module(t, map[string]string{
 		"internal/app/app.go": "package app\n\nimport \"os\"\n\nfunc Token() string { return os.Getenv(\"TOKEN\") }\n",
 	})
-	project := analyzers.Project{Module: "example.com/t", Kind: baseline.Command}
+	project := analyzers.Project{Module: "example.com/t"}
 	got, err := gopackages.Analyze(dir, analyzers.All(project))
 	if err != nil {
 		t.Fatal(err)

@@ -2,11 +2,11 @@
   "language": "go",
   "baseline": "github.com/ianflanagan1/go-baseline",
   "roles": {
-    "core": "Packages under internal/core/; every package of a pure-library module.",
-    "driven-adapter": "Packages under an adapters/driven/ directory of a command module; every package of an adapters module.",
-    "driving-adapter": "Packages under an adapters/driving/ directory of a command module.",
+    "core": "Packages under a core/ directory: internal/core/ in an application, core/ in a library.",
+    "driven-adapter": "Packages under an adapters/driven/ directory.",
+    "driving-adapter": "Packages under an adapters/driving/ directory.",
     "entrypoint": "Packages under cmd/.",
-    "orchestrator": "Every other package of a command module, outside cmd/ and adapters/."
+    "orchestrator": "Every other package, outside cmd/ and adapters/."
   },
   "checks": {
     "configread": {
@@ -114,7 +114,7 @@
     },
     "role-of": {
       "kind": "custom",
-      "summary": "RoleOf gives each package one role from its directory and the module kind, which .golangci.yml records."
+      "summary": "RoleOf gives each package one role from its directory alone, in every module."
     },
     "sumtypedecl": {
       "kind": "custom",
@@ -136,9 +136,9 @@
       "kind": "custom",
       "summary": "verify follows go list -deps and reports a third-party package of the core or an orchestrator that imports an I/O package at any depth."
     },
-    "verify-layout": {
+    "verify-release-unit": {
       "kind": "custom",
-      "summary": "verify reports cmd/ or adapters/ in a pure library, and cmd/ or core/ in an adapters module."
+      "summary": "verify reports, in a module with an entrypoint, each other package outside internal/, and in a library with any role but adapters, each adapter that imports another module."
     },
     "verify-roles": {
       "kind": "custom",
@@ -157,14 +157,15 @@
       ]
     },
     "applications-are-never-dependencies": {
-      "coverage": "partial",
+      "coverage": "full",
       "checks": [
-        "verify-layout"
+        "verify-release-unit"
       ],
-      "gap": "A command module's packages outside internal/ and cmd/, such as its root package, can be imported by another module; nothing requires them to be under internal/.",
       "proof": [
-        "internal/core/baseline: TestAPureLibraryCantHaveAdaptersOrCommands"
-      ]
+        "internal/core/baseline: TestAModuleWithAnEntrypointIsAnApplication",
+        "internal/core/baseline: TestAnApplicationsPackagesOutsideInternalAreReported"
+      ],
+      "note": "Go lets no other module import an internal/ package or a main package, so an application's packages can't be imported."
     },
     "arguments-are-not-mutated": {
       "coverage": "none"
@@ -261,7 +262,7 @@
         "role-of",
         "verify-dependencies"
       ],
-      "gap": "A dependency's packages get no role of their own. A pure library's are all core and an adapters module's all driven adapters, but only an I/O import, at any depth, stops the core or an orchestrator using one.",
+      "gap": "The analyzers give a dependency on go-baseline the roles its directories give, so its core counts as core, but depguard doesn't: a project's core can import a dependency's orchestrator or adapter, which only an I/O import, at any depth, stops.",
       "proof": [
         "internal/core/baseline: TestIODependenciesOfTheCoreAreReportedEvenIndirectly"
       ]
@@ -365,13 +366,12 @@
       "coverage": "full",
       "checks": [
         "role-of",
-        "verify-layout"
+        "verify-release-unit"
       ],
       "proof": [
-        "internal/core/baseline: TestAPureLibraryCantHaveAdaptersOrCommands",
-        "internal/core/baseline: TestAnAdaptersModuleCantHaveCommandsOrACore"
-      ],
-      "note": "A Go library is a pure library, whose packages are all core, or an adapters module, which holds only adapters, so no library mixes adapters with other roles."
+        "internal/core/baseline: TestALibrarysAdaptersUseOnlyTheStandardLibraryAndItsOwnPackages",
+        "internal/core/baseline: TestALibraryOfOnlyAdaptersMayUseAnyLibrary"
+      ]
     },
     "matches-on-closed-families-are-exhaustive": {
       "coverage": "full",
@@ -434,7 +434,7 @@
       ],
       "proof": [
         "internal/core/analyzers: TestConfigRead",
-        "internal/core/analyzers: TestAnAdaptersModuleMayReadConfiguration"
+        "internal/core/analyzers: TestTheEnvAdapterMayReadConfiguration"
       ]
     },
     "open-interfaces-are-not-matched-by-type": {
@@ -553,7 +553,7 @@
       "checks": [
         "depguard-containers"
       ],
-      "gap": "Only the common container libraries are banned, and an adapters module isn't checked. Wire, which generates the wiring as code, is allowed.",
+      "gap": "Only the common container libraries are banned. Wire, which generates the wiring as code, is allowed.",
       "proof": [
         "internal/core/baseline: TestConformance/wired-without-a-container"
       ]

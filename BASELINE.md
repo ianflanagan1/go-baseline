@@ -11,7 +11,7 @@ The rules this project shares with every Go project built on go-baseline. The li
 - Don't silence a linter with `//nolint`. Restructure the code so the rule holds.
 - When a rule makes the task impossible, or rules out the solution that's clearly best, stop and ask the user to change the baseline. Say which rule, what it blocks and the change to go-baseline you'd suggest. Do the same when a check is wrong about your code. Don't contort the code to get past the check, and don't loosen the rules yourself: no editing the generated files, and no older version or `replace` of go-baseline in `go.mod`. A person changes go-baseline and releases it, and the project upgrades.
 - Run `devbox run -- go mod tidy` after changing dependencies. `verify` fails when `go.mod` is untidy, or when the code calls a function with a known vulnerability; upgrade the dependency to fix one.
-- In a `command` module, `verify` reports each function that no program in `cmd/` calls, even indirectly. A function only tests call is unreachable too. Delete code nothing runs.
+- In an application, `verify` reports each function that no program in `cmd/` calls, even indirectly. A function only tests call is unreachable too. Delete code nothing runs.
 - Run tools through devbox (`devbox run -- go ...`), so the pinned Go and golangci-lint are used.
 - Run `go tool go-baseline map` to see each package's role, the ports the orchestrators declare and the driven adapters that implement them.
 
@@ -23,19 +23,18 @@ A package's directory decides its role, and its role decides its rules:
 
 | Role | Directory | Does I/O | Tested with |
 |---|---|---|---|
-| Core | `internal/core/...`; in a pure library, every package | Never, even through a dependency | Table-driven tests over values. At least 80% statement coverage per package. |
+| Core | `internal/core/...`; in a library, `core/...` | Never, even through a dependency | Table-driven tests over values. At least 80% statement coverage per package. |
 | Orchestrator | Any other directory | Only through ports | Fakes that implement its ports |
-| Driving adapter | `internal/adapters/driving/...` | Yes: it serves the outside world, and calls orchestrators | Tests that drive it, with real orchestrators and fakes for their ports |
-| Driven adapter | `internal/adapters/driven/...`, or any package of an `adapters` module | Yes: that's its job | Integration tests against the real dependency or a local stand-in |
+| Driving adapter | `internal/adapters/driving/...`; in a library, `adapters/driving/...` | Yes: it serves the outside world, and calls orchestrators | Tests that drive it, with real orchestrators and fakes for their ports |
+| Driven adapter | `internal/adapters/driven/...`; in a library, `adapters/driven/...` | Yes: that's its job | Integration tests against the real dependency or a local stand-in |
 | Entrypoint | `cmd/<name>` | Yes: reads configuration, builds the adapters and orchestrators, starts a driving adapter | Kept small enough not to need tests |
 
 A package directly under `adapters/`, in neither `driving/` nor `driven/`, has no role, and `verify` reports it.
 
-The module kind, recorded at the top of `.golangci.yml`, is one of:
+Nothing records what a module is; its roles decide:
 
-- `command`: builds programs from `cmd/`. Everything else is under `internal/`.
-- `pure-library`: imported by other modules and does no I/O. Every package is core, and it has no `adapters/` or `cmd/`. Other projects treat its packages as core too.
-- `adapters`: shared driven adapters, such as go-adapters, that other modules' entrypoints and driven adapters import. Every package is a driven adapter, with an adapter's size limits.
+- A module with a program in `cmd/` is an application, which no other module imports. `verify` reports each of its packages outside `cmd/` and `internal/`.
+- A module without one is a library. Its roles sit at the module root, outside `internal/`, so other modules can import them. Projects on go-baseline give a library's packages the roles their directories give, so a library's `core/` counts as core in them too.
 
 ### Core or orchestrator: who reads the value
 
@@ -44,7 +43,7 @@ When code needs a value from an outside source, such as the time, a file or an A
 - **The core takes the value.** The orchestrator reads it through a port and passes it in. A core function takes `now time.Time`, not a `Clock`; core tests pass values, with nothing to fake.
 - **The orchestrator takes the port.** It calls the port, passes the values to the core and acts on what the core returns.
 
-`verify` enforces this. Wherever code outside the core passes the core, or a pure library, a value as an interface, a function, a type argument or a variadic argument, or stores one in a core type's field, the value's concrete type must be pure: the core's own, a pure standard library type such as `*strings.Builder`, or a pure third-party type. A port, an adapter, a closure, an orchestrator's type or a slice made outside the core is reported. `error` is exempt. The linters also ban `context` from the core, because a context signals I/O.
+`verify` enforces this. Wherever code outside the core passes the core, or a library's core, a value as an interface, a function, a type argument or a variadic argument, or stores one in a core type's field, the value's concrete type must be pure: the core's own, a pure standard library type such as `*strings.Builder`, or a pure third-party type. A port, an adapter, a closure, an orchestrator's type or a slice made outside the core is reported. `error` is exempt. The linters also ban `context` from the core, because a context signals I/O.
 
 ### The orchestrator acts; the core decides
 
@@ -283,12 +282,12 @@ Use go-ports' `sqlmsg` with go-adapters' `sqlquery` only where the core decides 
 
 ## Libraries
 
-A library is a `pure-library`: it takes data and returns data, and its caller does the I/O. An API client builds requests and parses responses as `httpmsg` values from go-ports; the caller's orchestrator sends them through its own port, which `cmd/` satisfies with go-adapters' `httpsend`:
+Make a library pure, with only `core/`: it takes data and returns data, and its caller does the I/O. An API client builds requests and parses responses as `httpmsg` values from go-ports; the caller's orchestrator sends them through its own port, which `cmd/` satisfies with go-adapters' `httpsend`:
 
 ```go
-req := rates.Latest("GBP", "USD")       // pure library builds a value
+req := rates.Latest("GBP", "USD")       // library's core builds a value
 resp, err := sender.Send(ctx, req)      // caller's orchestrator, through its port
-rate, err := rates.ParseLatest(resp)    // pure library parses a value
+rate, err := rates.ParseLatest(resp)    // library's core parses a value
 ```
 
 A flow over several requests, such as paging or retries, stays pure the same way. The library returns the next step as a sum type:
@@ -348,7 +347,7 @@ for attempt := 0; ; attempt++ {
 }
 ```
 
-I/O shared by several projects goes in an `adapters` module, such as go-adapters, never in a library.
+Give a library orchestrators and adapters only when every caller would otherwise write the same orchestrators around its core. Its orchestrators take driven adapters through the ports they declare, and never build them or read configuration. Its adapters use only the standard library and the library's own packages, so its users don't inherit their dependencies; `verify` reports any other import. An adapter that needs a third-party module goes in a library of only adapters, such as go-adapters, which may import anything.
 
 ## Conventions
 

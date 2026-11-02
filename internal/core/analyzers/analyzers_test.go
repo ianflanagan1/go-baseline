@@ -6,53 +6,51 @@ import (
 	"golang.org/x/tools/go/analysis/analysistest"
 
 	"github.com/ianflanagan1/go-baseline/internal/core/analyzers"
-	"github.com/ianflanagan1/go-baseline/internal/core/baseline"
 )
 
-func project(kind baseline.Kind) analyzers.Project {
+func project() analyzers.Project {
 	return analyzers.Project{
-		Module:      "example.com/app",
-		Kind:        kind,
-		Impure:      map[string]bool{"example.com/sdk": true},
-		PureModules: map[string]bool{"example.com/ratelib": true},
+		Module:          "example.com/app",
+		Impure:          map[string]bool{"example.com/sdk": true},
+		BaselineModules: map[string]bool{"example.com/ratelib": true},
 	}
 }
 
 func TestCoreBoundary(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), analyzers.CoreBoundary(project(baseline.Command)),
+	analysistest.Run(t, analysistest.TestData(), analyzers.CoreBoundary(project()),
 		"example.com/app/internal/app", "example.com/app/cmd/app")
 }
 
 func TestConfigRead(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), analyzers.ConfigRead(project(baseline.Command)),
+	analysistest.Run(t, analysistest.TestData(), analyzers.ConfigRead(project()),
 		"example.com/app/internal/core/rates", "example.com/app/internal/config",
 		"example.com/app/internal/adapters/driven/store", "example.com/app/cmd/config")
 }
 
-func TestAnAdaptersModuleMayReadConfiguration(t *testing.T) {
+func TestTheEnvAdapterMayReadConfiguration(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), analyzers.ConfigRead(analyzers.Project{
-		Module: "github.com/ianflanagan1/go-adapters", Kind: baseline.Adapters,
-	}), "github.com/ianflanagan1/go-adapters/env")
+		Module: "github.com/ianflanagan1/go-adapters",
+	}), analyzers.EnvAdapter)
 }
 
 func TestAllReturnsEveryAnalyzer(t *testing.T) {
-	if got := len(analyzers.All(project(baseline.Command))); got != 5 {
+	if got := len(analyzers.All(project())); got != 5 {
 		t.Fatalf("got %d analyzers, want 5", got)
 	}
 }
 
 func TestNoDefault(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), analyzers.NoDefault(project(baseline.Command)),
+	analysistest.Run(t, analysistest.TestData(), analyzers.NoDefault(project()),
 		"example.com/app/internal/core/families")
 }
 
 func TestSumTypeDecl(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), analyzers.SumTypeDecl(project(baseline.Command)),
+	analysistest.Run(t, analysistest.TestData(), analyzers.SumTypeDecl(project()),
 		"example.com/app/internal/core/sealed")
 }
 
 func TestPortBranch(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), analyzers.PortBranch(project(baseline.Command)),
+	analysistest.Run(t, analysistest.TestData(), analyzers.PortBranch(project()),
 		"example.com/app/internal/orders", "example.com/app/internal/notify",
 		"example.com/app/internal/core/pricing")
 }
@@ -64,7 +62,7 @@ type ignoreExpectations struct{}
 func (ignoreExpectations) Errorf(string, ...any) {}
 
 func TestTheGuidesExamplesPassEveryAnalyzer(t *testing.T) {
-	for _, a := range analyzers.All(project(baseline.Command)) {
+	for _, a := range analyzers.All(project()) {
 		t.Run(a.Name, func(t *testing.T) {
 			results := analysistest.Run(ignoreExpectations{}, analysistest.TestData(), a, "example.com/app/internal/guide", "example.com/app/internal/core/lookup")
 			if len(results) == 0 {

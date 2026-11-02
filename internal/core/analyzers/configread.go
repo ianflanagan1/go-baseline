@@ -11,15 +11,15 @@ import (
 // ConfigRead returns the analyzer that keeps configuration in the
 // entrypoint. Environment variables, os.Args and the command-line
 // flags are read only in cmd/, which passes the values in, so the rest of
-// the code takes its configuration as plain values. An adapters module is
-// exempt: its environment adapter is how an entrypoint reads them.
+// the code takes its configuration as plain values. The env adapter is
+// exempt: it is how an entrypoint reads them.
 func ConfigRead(p Project) *analysis.Analyzer {
 	return &analysis.Analyzer{
 		Name: "configread",
 		Doc:  "reports configuration read outside an entrypoint",
 		Run: func(pass *analysis.Pass) (any, error) {
 			role, own := p.role(pass.Pkg.Path())
-			if !own || role == baseline.Entrypoint || p.Kind == baseline.Adapters {
+			if !own || role == baseline.Entrypoint || pass.Pkg.Path() == EnvAdapter {
 				return nil, nil
 			}
 			for ident, obj := range pass.TypesInfo.Uses {

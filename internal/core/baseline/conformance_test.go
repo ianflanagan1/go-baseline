@@ -24,7 +24,7 @@ type issue struct {
 }
 
 // lintConformanceFixture runs golangci-lint, with the config the baseline
-// generates for a command module, over testdata/conformance: a module with a
+// generates, over testdata/conformance: a module with a
 // package for each violation the rulebook's clauses describe.
 func lintConformanceFixture(t *testing.T) []issue {
 	t.Helper()
@@ -35,7 +35,7 @@ func lintConformanceFixture(t *testing.T) []issue {
 	if err := os.CopyFS(dir, os.DirFS("testdata/conformance")); err != nil {
 		t.Fatal(err)
 	}
-	config, err := baseline.GolangciConfig("example.com/conformance", baseline.Command)
+	config, err := baseline.GolangciConfig("example.com/conformance")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestTheLintTaskFailsOnUnformattedFiles(t *testing.T) {
 	if err := os.CopyFS(dir, os.DirFS("testdata/unformatted")); err != nil {
 		t.Fatal(err)
 	}
-	config, err := baseline.GolangciConfig("example.com/unformatted", baseline.PureLibrary)
+	config, err := baseline.GolangciConfig("example.com/unformatted")
 	if err != nil {
 		t.Fatal(err)
 	}

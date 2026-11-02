@@ -58,10 +58,10 @@ func goBaseline() listing {
 		Language: "go",
 		Baseline: "github.com/ianflanagan1/go-baseline",
 		Roles: map[string]string{
-			"core":            "Packages under internal/core/; every package of a pure-library module.",
-			"orchestrator":    "Every other package of a command module, outside cmd/ and adapters/.",
-			"driving-adapter": "Packages under an adapters/driving/ directory of a command module.",
-			"driven-adapter":  "Packages under an adapters/driven/ directory of a command module; every package of an adapters module.",
+			"core":            "Packages under a core/ directory: internal/core/ in an application, core/ in a library.",
+			"orchestrator":    "Every other package, outside cmd/ and adapters/.",
+			"driving-adapter": "Packages under an adapters/driving/ directory.",
+			"driven-adapter":  "Packages under an adapters/driven/ directory.",
 			"entrypoint":      "Packages under cmd/.",
 		},
 		Checks:  checks(),
@@ -74,9 +74,9 @@ func checks() map[string]check {
 	custom := func(summary string) check { return check{Kind: "custom", Summary: summary} }
 	language := func(summary string) check { return check{Kind: "language", Summary: summary} }
 	return map[string]check{
-		"role-of":                   custom("RoleOf gives each package one role from its directory and the module kind, which .golangci.yml records."),
+		"role-of":                   custom("RoleOf gives each package one role from its directory alone, in every module."),
 		"verify-roles":              custom("verify reports a package under adapters/ that is in neither adapters/driving/ nor adapters/driven/, which has no role."),
-		"verify-layout":             custom("verify reports cmd/ or adapters/ in a pure library, and cmd/ or core/ in an adapters module."),
+		"verify-release-unit":       custom("verify reports, in a module with an entrypoint, each other package outside internal/, and in a library with any role but adapters, each adapter that imports another module."),
 		"depguard-core":             lint("depguard's core rule: core packages import only the core, pure standard-library packages and third-party packages."),
 		"depguard-orchestrators":    lint("depguard's orchestrators rule: orchestrators import no adapter and no I/O package."),
 		"depguard-driving-adapters": lint("depguard's driving-adapters rule: driving adapters import no driven adapter."),
@@ -126,8 +126,8 @@ func claims() map[string]claim {
 		},
 		"dependency-units-keep-their-role": {
 			Coverage: "partial", Checks: []string{"role-of", "verify-dependencies"},
-			Gap: "A dependency's packages get no role of their own. A pure library's are all core and an adapters module's all driven adapters, " +
-				"but only an I/O import, at any depth, stops the core or an orchestrator using one.",
+			Gap: "The analyzers give a dependency on go-baseline the roles its directories give, so its core counts as core, but depguard doesn't: " +
+				"a project's core can import a dependency's orchestrator or adapter, which only an I/O import, at any depth, stops.",
 			Proof: []string{"internal/core/baseline: TestIODependenciesOfTheCoreAreReportedEvenIndirectly"},
 		},
 		"core-imports-only-core": {Coverage: "full", Checks: []string{"depguard-core"}, Proof: conformance("core-imports-only-core")},
@@ -177,12 +177,12 @@ func claims() map[string]claim {
 		"adapter-size-is-limited": {Coverage: "full", Checks: []string{"funlen-edges", "gocognit"}, Proof: conformance("adapter-size-is-limited")},
 		"only-entrypoints-read-configuration": {
 			Coverage: "full", Checks: []string{"configread"},
-			Proof: []string{"internal/core/analyzers: TestConfigRead", "internal/core/analyzers: TestAnAdaptersModuleMayReadConfiguration"},
+			Proof: []string{"internal/core/analyzers: TestConfigRead", "internal/core/analyzers: TestTheEnvAdapterMayReadConfiguration"},
 		},
 		"entrypoint-size-is-limited": {Coverage: "full", Checks: []string{"funlen-edges"}, Proof: conformance("entrypoint-size-is-limited")},
 		"wired-without-a-container": {
 			Coverage: "partial", Checks: []string{"depguard-containers"},
-			Gap:   "Only the common container libraries are banned, and an adapters module isn't checked. Wire, which generates the wiring as code, is allowed.",
+			Gap:   "Only the common container libraries are banned. Wire, which generates the wiring as code, is allowed.",
 			Proof: conformance("wired-without-a-container"),
 		},
 		"entrypoint-calls-only-driving-adapters": {Coverage: "none", Note: "Needs a check of what cmd/ calls, other than constructors and Close."},
@@ -199,15 +199,16 @@ func claims() map[string]claim {
 		},
 		"ports-named-in-domain-terms": {Coverage: "convention", Where: "BASELINE.md, Databases"},
 		"applications-are-never-dependencies": {
-			Coverage: "partial", Checks: []string{"verify-layout"},
-			Gap: "A command module's packages outside internal/ and cmd/, such as its root package, can be imported by another module; " +
-				"nothing requires them to be under internal/.",
-			Proof: []string{"internal/core/baseline: TestAPureLibraryCantHaveAdaptersOrCommands"},
+			Coverage: "full", Checks: []string{"verify-release-unit"},
+			Proof: []string{"internal/core/baseline: TestAModuleWithAnEntrypointIsAnApplication", "internal/core/baseline: TestAnApplicationsPackagesOutsideInternalAreReported"},
+			Note:  "Go lets no other module import an internal/ package or a main package, so an application's packages can't be imported.",
 		},
 		"library-adapters-use-only-the-standard-library": {
-			Coverage: "full", Checks: []string{"role-of", "verify-layout"},
-			Proof: []string{"internal/core/baseline: TestAPureLibraryCantHaveAdaptersOrCommands", "internal/core/baseline: TestAnAdaptersModuleCantHaveCommandsOrACore"},
-			Note:  "A Go library is a pure library, whose packages are all core, or an adapters module, which holds only adapters, so no library mixes adapters with other roles.",
+			Coverage: "full", Checks: []string{"role-of", "verify-release-unit"},
+			Proof: []string{
+				"internal/core/baseline: TestALibrarysAdaptersUseOnlyTheStandardLibraryAndItsOwnPackages",
+				"internal/core/baseline: TestALibraryOfOnlyAdaptersMayUseAnyLibrary",
+			},
 		},
 		"closed-families-are-sealed": {
 			Coverage: "partial", Checks: []string{"gochecksumtype", "sumtypedecl"},

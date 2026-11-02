@@ -3,14 +3,28 @@ version: '3'
 tasks:
   new:
     desc: >-
-      Create a Go project from go-template:
-      task new KIND=command|pure-library|adapters MODULE=<module-path> DIR=<absolute-dir>
+      Create a Go application from go-template:
+      task new MODULE=<module-path> DIR=<absolute-dir>
     requires:
-      vars:
-        - name: KIND
-          enum: [command, pure-library, adapters]
-        - MODULE
-        - DIR
+      vars: [MODULE, DIR]
+    cmds:
+      - task: new:copy
+      - task: new:application
+      - task: new:finish
+
+  new-library:
+    desc: >-
+      Create a Go library, with only a core, from go-template:
+      task new-library MODULE=<module-path> DIR=<absolute-dir>
+    requires:
+      vars: [MODULE, DIR]
+    cmds:
+      - task: new:copy
+      - task: new:library
+      - task: new:finish
+
+  new:copy:
+    internal: true
     preconditions:
       - sh: '[ {{isAbs .DIR}} = true ]'
         msg: DIR must be an absolute path, since devbox runs tasks from this repository's root
@@ -18,10 +32,8 @@ tasks:
       # go-template has no releases, so gonew copies its trunk's latest commit. Ask GitHub
       # directly: the module proxy caches @latest, so it can lag a push.
       - GOPROXY=direct go run golang.org/x/tools/cmd/gonew@v0.52.0 github.com/ianflanagan1/go-template {{shellQuote .MODULE}} {{shellQuote .DIR}}
-      - task: '{{if eq .KIND "command"}}new:command{{else}}new:library{{end}}'
-      - task: new:finish
 
-  new:command:
+  new:application:
     internal: true
     dir: '{{.DIR}}'
     vars:
@@ -75,20 +87,21 @@ tasks:
         ## Usage
 
         ```go
-        import "{{.MODULE}}"
+        import "{{.MODULE}}/core/{{.PACKAGE}}"
         ```
 
         ## Architecture
 
-        This is a `{{.KIND}}` module. `go tool go-baseline map` lists each package's role. The rules are in `BASELINE.md`.
+        `go tool go-baseline map` lists each package's role. The rules are in `BASELINE.md`.
     preconditions:
       - sh: '[ {{regexMatch "^[a-z_][a-z0-9_]*$" .PACKAGE}} = true ]'
         msg: new can't make a package name from {{base .MODULE}}
     cmds:
       # A library builds no programs, so it has neither cmd/ nor go-template's build task.
       - rm -r cmd Taskfile.project.yml
+      - mkdir -p core/{{shellQuote .PACKAGE}}
       - |
-        printf '// Package %s TODO: say what it provides.\npackage %s\n' {{shellQuote .PACKAGE}} {{shellQuote .PACKAGE}} > doc.go
+        printf '// Package %s TODO: say what it provides.\npackage %s\n' {{shellQuote .PACKAGE}} {{shellQuote .PACKAGE}} > core/{{shellQuote .PACKAGE}}/doc.go
       - printf '%s' {{shellQuote .README}} > README.md
 
   new:finish:
@@ -100,7 +113,7 @@ tasks:
       # GitHub directly: the module proxy caches @latest, so it can lag a release.
       - GOPROXY=direct go get -tool github.com/ianflanagan1/go-baseline/cmd/go-baseline@latest
       - go mod tidy
-      - go tool go-baseline write -kind {{shellQuote .KIND}}
+      - go tool go-baseline write
       - devbox run -- task check
       - git init --quiet --initial-branch=main
       - git add --all
