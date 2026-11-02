@@ -26,7 +26,7 @@ func Statuses(ctx context.Context, store Store) error { // want Statuses:"return
 	if err != nil {
 		return fmt.Errorf("reading the status: %w", err)
 	}
-	if status == 429 { // want `the shell branches on a value read through a port`
+	if status == 429 { // want `the orchestrator branches on a value read through a port`
 		return nil
 	}
 	switch pricing.Decide(status) {
@@ -34,7 +34,7 @@ func Statuses(ctx context.Context, store Store) error { // want Statuses:"return
 		return store.Save(ctx, "retry")
 	case pricing.Done:
 	}
-	if pricing.Allowed(status) && status > 0 { // want `the shell branches on a value read through a port`
+	if pricing.Allowed(status) && status > 0 { // want `the orchestrator branches on a value read through a port`
 		return nil
 	}
 	return nil
@@ -42,10 +42,10 @@ func Statuses(ctx context.Context, store Store) error { // want Statuses:"return
 
 func Errors(ctx context.Context, store Store) error { // want Errors:"returns a port value"
 	_, err := store.Status(ctx, "a")
-	if errors.Is(err, errMissing) { // want `the shell branches on a value read through a port`
+	if errors.Is(err, errMissing) { // want `the orchestrator branches on a value read through a port`
 		return nil
 	}
-	if err == errMissing { // want `the shell branches on a value read through a port`
+	if err == errMissing { // want `the orchestrator branches on a value read through a port`
 		return nil
 	}
 	return err
@@ -62,11 +62,11 @@ func Ranges(ctx context.Context, store Store) error { // want Ranges:"returns a 
 		}
 	}
 	for _, item := range items {
-		if strings.HasPrefix(item, "x") { // want `the shell branches on a value read through a port`
+		if strings.HasPrefix(item, "x") { // want `the orchestrator branches on a value read through a port`
 			return nil
 		}
 	}
-	if len(items) > 3 { // want `the shell branches on a value read through a port`
+	if len(items) > 3 { // want `the orchestrator branches on a value read through a port`
 		return nil
 	}
 	return nil
@@ -81,7 +81,7 @@ func Decodes(ctx context.Context, store Store) error { // want Decodes:"returns 
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return err
 	}
-	if body.Status > 0 { // want `the shell branches on a value read through a port`
+	if body.Status > 0 { // want `the orchestrator branches on a value read through a port`
 		return nil
 	}
 	return nil
@@ -104,7 +104,7 @@ func Acts(ctx context.Context, store Store, sleeper Sleeper) {
 func Closures(ctx context.Context, store Store) {
 	status, _ := store.Status(ctx, "a")
 	func() {
-		if status > 0 { // want `the shell branches on a value read through a port`
+		if status > 0 { // want `the orchestrator branches on a value read through a port`
 			return
 		}
 	}()
@@ -139,12 +139,12 @@ func Same(status int) int { return status } // want Same:"returns parameter 0"
 func Decided(status int) bool { return pricing.Allowed(status) }
 
 func Helpers(ctx context.Context, store Store) {
-	if Fetch(ctx, store) > 0 { // want `the shell branches on a value read through a port`
+	if Fetch(ctx, store) > 0 { // want `the orchestrator branches on a value read through a port`
 		return
 	}
 	Check(Fetch(ctx, store)) // want `Check branches on a value read through a port, passed to it here`
 	Check(1)
-	if Same(Fetch(ctx, store)) > 0 { // want `the shell branches on a value read through a port`
+	if Same(Fetch(ctx, store)) > 0 { // want `the orchestrator branches on a value read through a port`
 		return
 	}
 	if Same(1) > 0 {

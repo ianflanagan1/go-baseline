@@ -106,3 +106,8 @@ tasks:
       - git add --all
       - git commit --quiet --message "Initialise from go-template"
       - echo "Created {{.MODULE}} in {{.DIR}}"
+
+  rulebook-coverage:
+    desc: Write rulebook-coverage.json, how go-baseline enforces the code rulebook, for the rulebook to import
+    cmds:
+      - go run ./cmd/go-baseline rulebook > rulebook-coverage.json

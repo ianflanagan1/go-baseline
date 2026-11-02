@@ -1,0 +1,551 @@
+{
+  "language": "go",
+  "baseline": "github.com/ianflanagan1/go-baseline",
+  "roles": {
+    "core": "Packages under internal/core/; every package of a pure-library module.",
+    "driven-adapter": "Packages under an adapters/driven/ directory of a command module; every package of an adapters module.",
+    "driving-adapter": "Packages under an adapters/driving/ directory of a command module.",
+    "entrypoint": "Packages under cmd/.",
+    "orchestrator": "Every other package of a command module, outside cmd/ and adapters/."
+  },
+  "checks": {
+    "configread": {
+      "kind": "custom",
+      "summary": "Analyzer: environment variables, flags and os.Args are read only in cmd/."
+    },
+    "coreboundary": {
+      "kind": "custom",
+      "summary": "Analyzer: a value passed to the core as an interface, function, type argument or field has a pure concrete type."
+    },
+    "depguard-containers": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "depguard's containers rule: no package imports a dependency-injection container (fx, dig, do, di or golobby/container)."
+    },
+    "depguard-core": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "depguard's core rule: core packages import only the core, pure standard-library packages and third-party packages."
+    },
+    "depguard-driven-adapters": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "depguard's driven-adapters rule: driven adapters import only the core and other driven adapters."
+    },
+    "depguard-driving-adapters": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "depguard's driving-adapters rule: driving adapters import no driven adapter."
+    },
+    "depguard-orchestrators": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "depguard's orchestrators rule: orchestrators import no adapter and no I/O package."
+    },
+    "entrypoint-unimportable": {
+      "kind": "language",
+      "summary": "An entrypoint is a main package, which Go lets no package import."
+    },
+    "errcheck": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "errcheck: no returned error is dropped, unless discarded explicitly with _."
+    },
+    "exhaustive": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "exhaustive: a switch on an enum names every value, with default-signifies-exhaustive off."
+    },
+    "forbidigo-effects": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "forbidigo bans the clock, printing and the global loggers outside adapters and cmd/."
+    },
+    "funlen-edges": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "funlen limits functions in adapters and cmd/ to 50 lines and 30 statements."
+    },
+    "go-syntax": {
+      "kind": "language",
+      "summary": "Go has no class inheritance, default or optional parameters, or field initialisers; the parser rejects the syntax other languages use for them."
+    },
+    "gochecknoglobals": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "Bans package-level variables everywhere."
+    },
+    "gochecksumtype": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "gochecksumtype: an interface marked //sumtype:decl is sealed, and a type switch on it names every variant, with default-signifies-exhaustive off."
+    },
+    "gocognit": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "Cognitive complexity at most 10 everywhere but cmd/."
+    },
+    "golangci-fmt": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "golangci-lint fmt --diff, which the lint task runs, fails on any file gofumpt or goimports would change."
+    },
+    "import-cycles": {
+      "kind": "language",
+      "summary": "The Go compiler rejects import cycles between packages."
+    },
+    "ineffassign": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "ineffassign: no assigned value goes unread."
+    },
+    "nodefault": {
+      "kind": "custom",
+      "summary": "Analyzer: a switch on the project's own enum, or a type switch on its own sealed interface, has no default arm."
+    },
+    "portbranch": {
+      "kind": "custom",
+      "summary": "Analyzer: follows values read through a port and reports orchestrator conditions that depend on them."
+    },
+    "role-of": {
+      "kind": "custom",
+      "summary": "RoleOf gives each package one role from its directory and the module kind, which .golangci.yml records."
+    },
+    "sumtypedecl": {
+      "kind": "custom",
+      "summary": "Analyzer: every sealed interface, one with an unexported method, is marked //sumtype:decl."
+    },
+    "unexported-methods": {
+      "kind": "language",
+      "summary": "Only a type in an interface's own package can have its unexported methods, so only that package can implement an interface with one."
+    },
+    "unused-variables": {
+      "kind": "language",
+      "summary": "The Go compiler rejects a local variable that is declared and never used."
+    },
+    "verify-config": {
+      "kind": "custom",
+      "summary": "verify reports a .golangci.yml or Taskfile.yml that differs from the one the baseline generates."
+    },
+    "verify-dependencies": {
+      "kind": "custom",
+      "summary": "verify follows go list -deps and reports a third-party package of the core or an orchestrator that imports an I/O package at any depth."
+    },
+    "verify-layout": {
+      "kind": "custom",
+      "summary": "verify reports cmd/ or adapters/ in a pure library, and cmd/ or core/ in an adapters module."
+    },
+    "verify-roles": {
+      "kind": "custom",
+      "summary": "verify reports a package under adapters/ that is in neither adapters/driving/ nor adapters/driven/, which has no role."
+    }
+  },
+  "clauses": {
+    "adapter-size-is-limited": {
+      "coverage": "full",
+      "checks": [
+        "funlen-edges",
+        "gocognit"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/adapter-size-is-limited"
+      ]
+    },
+    "applications-are-never-dependencies": {
+      "coverage": "partial",
+      "checks": [
+        "verify-layout"
+      ],
+      "gap": "A command module's packages outside internal/ and cmd/, such as its root package, can be imported by another module; nothing requires them to be under internal/.",
+      "proof": [
+        "internal/core/baseline: TestAPureLibraryCantHaveAdaptersOrCommands"
+      ]
+    },
+    "arguments-are-not-mutated": {
+      "coverage": "none"
+    },
+    "check-fails-on-unformatted-files": {
+      "coverage": "full",
+      "checks": [
+        "golangci-fmt",
+        "verify-config"
+      ],
+      "proof": [
+        "internal/core/baseline: TestTheLintTaskFailsOnUnformattedFiles",
+        "internal/core/baseline: TestTaskfileDriftIsReported"
+      ]
+    },
+    "classes-extend-only-allowed-bases": {
+      "coverage": "full",
+      "checks": [
+        "go-syntax"
+      ],
+      "proof": [
+        "internal/core/baseline: TestGoHasNoSyntaxFor/classes-extend-only-allowed-bases"
+      ],
+      "note": "Struct embedding, which promotes the embedded type's methods, is the nearest thing, and isn't checked."
+    },
+    "closed-families-are-sealed": {
+      "coverage": "partial",
+      "checks": [
+        "gochecksumtype",
+        "sumtypedecl"
+      ],
+      "gap": "A family whose interface has only exported methods isn't recognised as one, so nothing stops another package implementing it.",
+      "proof": [
+        "internal/core/baseline: TestConformance/closed-families-are-sealed",
+        "internal/core/analyzers: TestSumTypeDecl"
+      ]
+    },
+    "closed-types-have-no-way-around-their-factories": {
+      "coverage": "none",
+      "note": "Not decided for Go: see the TODO in the rulebook's constructors-only-store rule."
+    },
+    "constructors-only-store-their-arguments": {
+      "coverage": "none",
+      "note": "Go's constructors are New functions, which nothing tells apart from other functions yet."
+    },
+    "core-imports-only-core": {
+      "coverage": "full",
+      "checks": [
+        "depguard-core"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/core-imports-only-core"
+      ]
+    },
+    "core-libraries-are-pure": {
+      "coverage": "full",
+      "checks": [
+        "verify-dependencies"
+      ],
+      "proof": [
+        "internal/core/baseline: TestIODependenciesOfTheCoreAreReportedEvenIndirectly",
+        "internal/core/baseline: TestImpurePackagesIncludeThoseReachingIOThroughOthers"
+      ]
+    },
+    "core-locals-are-not-reassigned-once-read": {
+      "case": "unsupported",
+      "coverage": "none"
+    },
+    "core-performs-no-effects": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-core",
+        "forbidigo-effects",
+        "gochecknoglobals"
+      ],
+      "gap": "Keeping state that changes across calls in an instance's fields (held-state) isn't detected.",
+      "proof": [
+        "internal/core/baseline: TestConformance/core-performs-no-effects"
+      ],
+      "note": "depguard bans the I/O packages, which include os (environment, files, standard streams), math/rand and crypto/rand; forbidigo bans the clock and printing, which live in pure packages."
+    },
+    "core-receives-only-pure-values": {
+      "coverage": "full",
+      "checks": [
+        "coreboundary"
+      ],
+      "proof": [
+        "internal/core/analyzers: TestCoreBoundary"
+      ]
+    },
+    "dependency-units-keep-their-role": {
+      "coverage": "partial",
+      "checks": [
+        "role-of",
+        "verify-dependencies"
+      ],
+      "gap": "A dependency's packages get no role of their own. A pure library's are all core and an adapters module's all driven adapters, but only an I/O import, at any depth, stops the core or an orchestrator using one.",
+      "proof": [
+        "internal/core/baseline: TestIODependenciesOfTheCoreAreReportedEvenIndirectly"
+      ]
+    },
+    "driven-adapter-calls-no-orchestrator": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-driven-adapters"
+      ],
+      "gap": "A driven adapter that declares an interface and is given an orchestrator through it by the entrypoint isn't caught; only importing one is.",
+      "proof": [
+        "internal/core/baseline: TestConformance/driven-adapter-calls-no-orchestrator"
+      ]
+    },
+    "driven-adapter-imports-only-core-ports-and-driven-adapters": {
+      "coverage": "full",
+      "checks": [
+        "depguard-driven-adapters",
+        "entrypoint-unimportable"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/driven-adapter-imports-only-core-ports-and-driven-adapters"
+      ]
+    },
+    "driving-adapter-calls-no-driven-adapter": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-driving-adapters"
+      ],
+      "gap": "A driving adapter that declares an interface and is given a driven adapter through it by the entrypoint isn't caught; only importing one is.",
+      "proof": [
+        "internal/core/baseline: TestConformance/driving-adapter-calls-no-driven-adapter"
+      ]
+    },
+    "driving-adapter-imports-only-core-orchestrators-and-driving-adapters": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-driving-adapters",
+        "entrypoint-unimportable"
+      ],
+      "gap": "A port is declared in the orchestrator's package, which a driving adapter may import, so a driving adapter that takes a port isn't caught.",
+      "proof": [
+        "internal/core/baseline: TestConformance/driving-adapter-imports-only-core-orchestrators-and-driving-adapters"
+      ]
+    },
+    "entrypoint-calls-only-driving-adapters": {
+      "coverage": "none",
+      "note": "Needs a check of what cmd/ calls, other than constructors and Close."
+    },
+    "entrypoint-size-is-limited": {
+      "coverage": "full",
+      "checks": [
+        "funlen-edges"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/entrypoint-size-is-limited"
+      ]
+    },
+    "every-unit-has-one-role": {
+      "coverage": "full",
+      "checks": [
+        "role-of",
+        "verify-roles"
+      ],
+      "proof": [
+        "internal/core/baseline: TestRolesFollowThePath",
+        "internal/core/baseline: TestAnAdapterInNeitherDrivingNorDrivenHasNoRole",
+        "internal/core/baseline: TestAPackageWithNoRoleIsReported"
+      ]
+    },
+    "field-collections-are-not-changed": {
+      "coverage": "none"
+    },
+    "field-initialisers-are-constants": {
+      "coverage": "full",
+      "checks": [
+        "go-syntax"
+      ],
+      "proof": [
+        "internal/core/baseline: TestGoHasNoSyntaxFor/field-initialisers-are-constants"
+      ]
+    },
+    "fields-are-assigned-only-at-construction": {
+      "coverage": "none"
+    },
+    "formatter-settings-come-from-the-baseline": {
+      "coverage": "full",
+      "checks": [
+        "verify-config"
+      ],
+      "proof": [
+        "internal/core/baseline: TestAnEditedConfigIsReported"
+      ],
+      "note": "gofumpt and goimports are configured in .golangci.yml, which verify keeps as the baseline generates it."
+    },
+    "invariant-types-are-closed": {
+      "coverage": "none",
+      "note": "Not decided for Go: see the TODO in the rulebook's constructors-only-store rule."
+    },
+    "library-adapters-use-only-the-standard-library": {
+      "coverage": "full",
+      "checks": [
+        "role-of",
+        "verify-layout"
+      ],
+      "proof": [
+        "internal/core/baseline: TestAPureLibraryCantHaveAdaptersOrCommands",
+        "internal/core/baseline: TestAnAdaptersModuleCantHaveCommandsOrACore"
+      ],
+      "note": "A Go library is a pure library, whose packages are all core, or an adapters module, which holds only adapters, so no library mixes adapters with other roles."
+    },
+    "matches-on-closed-families-are-exhaustive": {
+      "coverage": "full",
+      "checks": [
+        "gochecksumtype",
+        "exhaustive",
+        "sumtypedecl"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/matches-on-closed-families-are-exhaustive",
+        "internal/core/analyzers: TestSumTypeDecl"
+      ],
+      "note": "sumtypedecl makes every sealed interface carry the marker gochecksumtype looks for."
+    },
+    "matches-on-closed-families-have-no-default-arm": {
+      "coverage": "full",
+      "checks": [
+        "exhaustive",
+        "gochecksumtype",
+        "nodefault"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/matches-on-closed-families-have-no-default-arm",
+        "internal/core/analyzers: TestNoDefault"
+      ],
+      "note": "A default arm doesn't excuse a missing case, and nodefault reports one beside cases that name every value. A switch on another module's type may have one. Go needs no catch-all."
+    },
+    "no-import-cycles": {
+      "coverage": "full",
+      "checks": [
+        "import-cycles"
+      ],
+      "proof": [
+        "internal/core/baseline: TestTheCompilerRejectsImportCycles"
+      ]
+    },
+    "no-optional-parameters": {
+      "coverage": "full",
+      "checks": [
+        "go-syntax"
+      ],
+      "proof": [
+        "internal/core/baseline: TestGoHasNoSyntaxFor/no-optional-parameters"
+      ],
+      "note": "A variadic parameter can be left out. It's how Go passes a list, and isn't checked."
+    },
+    "no-parameter-default-values": {
+      "coverage": "full",
+      "checks": [
+        "go-syntax"
+      ],
+      "proof": [
+        "internal/core/baseline: TestGoHasNoSyntaxFor/no-parameter-default-values"
+      ]
+    },
+    "only-entrypoints-read-configuration": {
+      "coverage": "full",
+      "checks": [
+        "configread"
+      ],
+      "proof": [
+        "internal/core/analyzers: TestConfigRead",
+        "internal/core/analyzers: TestAnAdaptersModuleMayReadConfiguration"
+      ]
+    },
+    "open-interfaces-are-not-matched-by-type": {
+      "coverage": "none",
+      "note": "Needs a check of type switches and assertions on interfaces that aren't sealed."
+    },
+    "orchestrator-branches-only-on-core-results": {
+      "coverage": "partial",
+      "checks": [
+        "portbranch"
+      ],
+      "gap": "Computing with a port's value without branching on it, such as sorting it, isn't detected.",
+      "proof": [
+        "internal/core/analyzers: TestPortBranch"
+      ]
+    },
+    "orchestrator-imports-no-adapter": {
+      "coverage": "full",
+      "checks": [
+        "depguard-orchestrators",
+        "entrypoint-unimportable"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/orchestrator-imports-no-adapter"
+      ]
+    },
+    "orchestrator-libraries-are-pure": {
+      "coverage": "full",
+      "checks": [
+        "verify-dependencies"
+      ],
+      "proof": [
+        "internal/core/baseline: TestVerifyReportsIODependencies"
+      ]
+    },
+    "orchestrator-performs-no-effects": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-orchestrators",
+        "forbidigo-effects",
+        "gochecknoglobals"
+      ],
+      "gap": "Keeping state that changes across calls in an instance's fields (held-state) isn't detected.",
+      "proof": [
+        "internal/core/baseline: TestConformance/orchestrator-performs-no-effects"
+      ]
+    },
+    "parameters-are-not-reassigned": {
+      "coverage": "none"
+    },
+    "port-units-follow-typing": {
+      "case": "structural",
+      "coverage": "partial",
+      "checks": [
+        "depguard-driven-adapters"
+      ],
+      "gap": "A package of interfaces that other orchestrators import is an orchestrator like any other, so a ports package isn't caught.",
+      "proof": [
+        "internal/core/baseline: TestConformance/port-units-follow-typing"
+      ],
+      "note": "A driven adapter can't import the orchestrator that declares the port it implements."
+    },
+    "ports-are-open": {
+      "coverage": "full",
+      "checks": [
+        "unexported-methods"
+      ],
+      "proof": [
+        "internal/core/baseline: TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage"
+      ],
+      "note": "A port sealed with an unexported method can't be implemented by a driven adapter or a test fake in another package, so the program doesn't compile."
+    },
+    "ports-declared-by-their-user": {
+      "coverage": "full",
+      "checks": [
+        "depguard-orchestrators"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/ports-declared-by-their-user"
+      ],
+      "note": "An orchestrator can't import an adapter, so it can't take an interface an adapter declares."
+    },
+    "ports-named-in-domain-terms": {
+      "coverage": "convention",
+      "where": "BASELINE.md, Databases"
+    },
+    "returned-failures-are-used": {
+      "coverage": "partial",
+      "checks": [
+        "errcheck",
+        "ineffassign",
+        "unused-variables"
+      ],
+      "gap": "A call that drops all of a (T, bool) result, as a statement, isn't reported.",
+      "proof": [
+        "internal/core/baseline: TestConformance/returned-failures-are-used"
+      ]
+    },
+    "sealed-variants-share-their-unit": {
+      "coverage": "full",
+      "checks": [
+        "unexported-methods"
+      ],
+      "proof": [
+        "internal/core/baseline: TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage"
+      ]
+    },
+    "wired-without-a-container": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-containers"
+      ],
+      "gap": "Only the common container libraries are banned, and an adapters module isn't checked. Wire, which generates the wiring as code, is allowed.",
+      "proof": [
+        "internal/core/baseline: TestConformance/wired-without-a-container"
+      ]
+    }
+  }
+}

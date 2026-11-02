@@ -64,7 +64,7 @@ func TestAGoModWithoutAModuleLineIsAnError(t *testing.T) {
 	}
 }
 
-func TestTheGeneratedConfigBansAdaptersFromTheShellByModulePath(t *testing.T) {
+func TestTheGeneratedConfigBansAdaptersFromOrchestratorsByModulePath(t *testing.T) {
 	config, err := baseline.GolangciConfig("example.com/app", baseline.Command)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestTheGeneratedConfigBansAdaptersFromTheShellByModulePath(t *testing.T) {
 	}
 }
 
-func TestTheGeneratedConfigBansAdaptersFromTheShellForAnyModule(t *testing.T) {
+func TestTheGeneratedConfigBansAdaptersFromOrchestratorsForAnyModule(t *testing.T) {
 	config, err := baseline.GolangciConfig("example.com/lib", baseline.Command)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +96,7 @@ func TestTheGeneratedConfigRequiresWrappingOnlyOtherModulesErrors(t *testing.T) 
 	}
 }
 
-func TestTheGeneratedConfigLimitsTheComplexityOfEveryPackageButTheCompositionRoot(t *testing.T) {
+func TestTheGeneratedConfigLimitsTheComplexityOfEveryPackageButTheEntrypoint(t *testing.T) {
 	cmdExemption := "      - path: (^|/)cmd/\n        linters:\n          - gocognit\n"
 	for _, tc := range []struct {
 		kind baseline.Kind
@@ -116,7 +116,7 @@ func TestTheGeneratedConfigLimitsTheComplexityOfEveryPackageButTheCompositionRoo
 				t.Fatalf("got %d gocognit exemptions besides tests, want %d:\n%s", got, tc.exemptions, config)
 			}
 			if tc.exemptions == 1 && !strings.Contains(string(config), cmdExemption) {
-				t.Fatalf("config doesn't exempt only the composition root:\n%s", config)
+				t.Fatalf("config doesn't exempt only the entrypoint:\n%s", config)
 			}
 		})
 	}
@@ -166,12 +166,12 @@ func TestAnUnknownKindIsAnError(t *testing.T) {
 	}
 }
 
-func TestAPureLibraryConfigHasNoShell(t *testing.T) {
+func TestAPureLibraryConfigHasNoOrchestratorRules(t *testing.T) {
 	config, err := baseline.GolangciConfig("example.com/lib", baseline.PureLibrary)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(config), "shell:") || !strings.Contains(string(config), "- pkg: context\n") {
+	if strings.Contains(string(config), "orchestrators:") || !strings.Contains(string(config), "- pkg: context\n") {
 		t.Fatalf("want only core rules, including no context:\n%s", config)
 	}
 }
@@ -347,29 +347,50 @@ func TestRolesFollowThePath(t *testing.T) {
 		want baseline.Role
 	}{
 		{baseline.Command, "internal/core/greeting", baseline.Core},
-		{baseline.Command, "internal/app", baseline.Shell},
-		{baseline.Command, "", baseline.Shell},
-		{baseline.Command, "internal/adapters/clock", baseline.Adapter},
-		{baseline.Command, "adapters/clock", baseline.Adapter},
-		{baseline.Command, "cmd/app", baseline.Root},
-		{baseline.Command, "internal/corefake", baseline.Shell},
+		{baseline.Command, "internal/app", baseline.Orchestrator},
+		{baseline.Command, "", baseline.Orchestrator},
+		{baseline.Command, "internal/adapters/driving/httpapi", baseline.DrivingAdapter},
+		{baseline.Command, "internal/adapters/driven/clock", baseline.DrivenAdapter},
+		{baseline.Command, "adapters/driven/clock", baseline.DrivenAdapter},
+		{baseline.Command, "cmd/app", baseline.Entrypoint},
+		{baseline.Command, "internal/corefake", baseline.Orchestrator},
 		{baseline.PureLibrary, "", baseline.Core},
 		{baseline.PureLibrary, "parse", baseline.Core},
-		{baseline.Adapters, "", baseline.Adapter},
-		{baseline.Adapters, "clock", baseline.Adapter},
+		{baseline.Adapters, "", baseline.DrivenAdapter},
+		{baseline.Adapters, "clock", baseline.DrivenAdapter},
 	} {
 		t.Run(string(tc.kind)+":"+tc.dir, func(t *testing.T) {
-			if got := baseline.RoleOf(tc.kind, tc.dir); got != tc.want {
-				t.Fatalf("got %v, want %v", got, tc.want)
+			if got, ok := baseline.RoleOf(tc.kind, tc.dir); !ok || got != tc.want {
+				t.Fatalf("got %v, %t, want %v", got, ok, tc.want)
 			}
 		})
 	}
 }
 
+func TestAnAdapterInNeitherDrivingNorDrivenHasNoRole(t *testing.T) {
+	for _, dir := range []string{"internal/adapters", "internal/adapters/clock", "internal/adapters/clock/driven"} {
+		t.Run(dir, func(t *testing.T) {
+			if got, ok := baseline.RoleOf(baseline.Command, dir); ok {
+				t.Fatalf("got %v, want no role", got)
+			}
+		})
+	}
+}
+
+func TestAPackageWithNoRoleIsReported(t *testing.T) {
+	own := func(path string) baseline.Package {
+		return baseline.Package{ImportPath: path, Module: &struct{ Path, Dir string }{Path: "example.com/app"}}
+	}
+	problems := baseline.RolelessProblems("example.com/app", baseline.Command, []baseline.Package{
+		own("example.com/app/internal/adapters/clock"), own("example.com/app/internal/adapters/driven/store"),
+	})
+	assertOneProblem(t, problems, "example.com/app/internal/adapters/clock has no role; move it to adapters/driving/")
+}
+
 func TestRolesHaveNames(t *testing.T) {
 	for role, want := range map[baseline.Role]string{
-		baseline.Core: "core", baseline.Shell: "shell", baseline.Adapter: "adapter",
-		baseline.Root: "composition root", baseline.Role(0): "Role(0)",
+		baseline.Core: "core", baseline.Orchestrator: "orchestrator", baseline.DrivingAdapter: "driving adapter",
+		baseline.DrivenAdapter: "driven adapter", baseline.Entrypoint: "entrypoint", baseline.Role(0): "Role(0)",
 	} {
 		if got := role.String(); got != want {
 			t.Errorf("got %q, want %q", got, want)
@@ -388,7 +409,7 @@ const goList = `{"ImportPath": "os", "Standard": true}
 {"ImportPath": "example.com/sdk", "Imports": ["os"], "Module": {"Path": "example.com/sdk"}}
 {"ImportPath": "example.com/app/internal/core/rates", "Imports": ["example.com/mid", "example.com/pure", "fmt"], "Module": {"Path": "example.com/app"}}
 {"ImportPath": "example.com/app/internal/app", "Imports": ["example.com/app/internal/core/rates"], "Module": {"Path": "example.com/app"}}
-{"ImportPath": "example.com/app/internal/adapters/store", "Imports": ["example.com/sdk", "os"], "Module": {"Path": "example.com/app"}}
+{"ImportPath": "example.com/app/internal/adapters/driven/store", "Imports": ["example.com/sdk", "os"], "Module": {"Path": "example.com/app"}}
 `
 
 func parsedGoList(t *testing.T) []baseline.Package {
@@ -424,15 +445,15 @@ const goTestOutput = "?   \texample.com/app/internal/core/types\t[no test files]
 	"\texample.com/app/internal/core/untested\t\tcoverage: 0.0% of statements\n" +
 	"ok  \texample.com/app/internal/core/rates\t0.004s\tcoverage: 92.5% of statements\n" +
 	"ok  \texample.com/app/internal/core/thin\t0.004s\tcoverage: 61.0% of statements\n" +
-	"\texample.com/app/internal/adapters/store\t\tcoverage: 0.0% of statements\n"
+	"\texample.com/app/internal/adapters/driven/store\t\tcoverage: 0.0% of statements\n"
 
 func TestCoverageIsReadPerPackage(t *testing.T) {
 	got := baseline.ParseCoverage([]byte(goTestOutput))
 	want := map[string]float64{
-		"example.com/app/internal/core/untested":  0,
-		"example.com/app/internal/core/rates":     92.5,
-		"example.com/app/internal/core/thin":      61,
-		"example.com/app/internal/adapters/store": 0,
+		"example.com/app/internal/core/untested":         0,
+		"example.com/app/internal/core/rates":            92.5,
+		"example.com/app/internal/core/thin":             61,
+		"example.com/app/internal/adapters/driven/store": 0,
 	}
 	if !maps.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)

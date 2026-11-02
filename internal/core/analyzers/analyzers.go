@@ -14,7 +14,7 @@ import (
 )
 
 // EnvAdapter is the shared adapter for the process environment, which only a
-// composition root may use.
+// entrypoint may use.
 const EnvAdapter = "github.com/ianflanagan1/go-adapters/env"
 
 // Project is what the analyzers need to know about the project under
@@ -37,13 +37,13 @@ func All(p Project) []*analysis.Analyzer {
 }
 
 // role returns the role of the package at importPath, and false when the
-// package isn't the project's own.
+// package isn't the project's own or has no role, which verify reports.
 func (p Project) role(importPath string) (baseline.Role, bool) {
 	switch {
 	case importPath == p.Module:
-		return baseline.RoleOf(p.Kind, ""), true
+		return baseline.RoleOf(p.Kind, "")
 	case strings.HasPrefix(importPath, p.Module+"/"):
-		return baseline.RoleOf(p.Kind, strings.TrimPrefix(importPath, p.Module+"/")), true
+		return baseline.RoleOf(p.Kind, strings.TrimPrefix(importPath, p.Module+"/"))
 	default:
 		return 0, false
 	}

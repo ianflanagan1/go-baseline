@@ -15,8 +15,8 @@ import (
 	"github.com/ianflanagan1/go-baseline/internal/core/baseline"
 )
 
-// PortBranch returns the analyzer that keeps decisions out of the shell. The
-// shell may branch on what the core returns and on whether an error is nil,
+// PortBranch returns the analyzer that keeps decisions out of orchestrators. An
+// orchestrator may branch on what the core returns and on whether an error is nil,
 // but not on a value read through a port: it passes that value to the core
 // and acts on what the core returns.
 //
@@ -26,16 +26,16 @@ import (
 // slice or map it's stored in and what a call outside the core writes
 // through a pointer passed with it. Ranging over one is allowed: doing the
 // same thing for each element isn't a decision. A value passed to another
-// shell function that branches on it is reported where it's passed, using
+// orchestrator function that branches on it is reported where it's passed, using
 // facts for functions in other packages.
 func PortBranch(p Project) *analysis.Analyzer {
 	return &analysis.Analyzer{
 		Name:      "portbranch",
-		Doc:       "reports the shell branching on values read through ports",
+		Doc:       "reports orchestrators branching on values read through ports",
 		Requires:  []*analysis.Analyzer{buildssa.Analyzer},
 		FactTypes: []analysis.Fact{new(shellSummary)},
 		Run: func(pass *analysis.Pass) (any, error) {
-			if role, own := p.role(pass.Pkg.Path()); !own || role != baseline.Shell {
+			if role, own := p.role(pass.Pkg.Path()); !own || role != baseline.Orchestrator {
 				return nil, nil
 			}
 			var fns []*ssa.Function
@@ -201,7 +201,7 @@ func (s shell) decisions(fn *ssa.Function, tainted map[ssa.Value]bool) []decisio
 			if tainted[instr.Cond] && !isRangeLoop(block) {
 				found = append(found, decision{
 					position(instr.Cond, fn),
-					"the shell branches on a value read through a port; pass it to the core and act on what the core returns",
+					"the orchestrator branches on a value read through a port; pass it to the core and act on what the core returns",
 				})
 			}
 		case ssa.CallInstruction:
@@ -245,7 +245,7 @@ func (s shell) summaryOf(callee *ssa.Function) *shellSummary {
 	if obj == nil || obj.Pkg() == nil {
 		return nil
 	}
-	if role, own := s.project.role(obj.Pkg().Path()); !own || role != baseline.Shell {
+	if role, own := s.project.role(obj.Pkg().Path()); !own || role != baseline.Orchestrator {
 		return nil
 	}
 	// A function with nothing to say has no fact.

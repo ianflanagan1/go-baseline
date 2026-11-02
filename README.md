@@ -4,7 +4,7 @@ The settings every Go project shares, and the command that keeps a project on th
 
 ## Starting a project
 
-From this repo, with the module kind: `command`, `pure-library` (no I/O; every package is core) or `adapters` (shared adapters, such as go-adapters):
+From this repo, with the module kind: `command`, `pure-library` (no I/O; every package is core) or `adapters` (shared driven adapters, such as go-adapters):
 
 ```sh
 devbox run -- task new KIND=<kind> MODULE=github.com/ianflanagan1/<name> DIR=~/projects-ianf/<category>/<name>
@@ -36,7 +36,7 @@ Publish it with `github publish` from repo-tools.
 | No scripts: every command is a task | `devbox.json` | `verify` |
 | Values reaching the core through interfaces, functions, fields or type arguments are pure (`coreboundary`) | code | `verify` |
 | Configuration (environment, flags, `os.Args`) is read only in `cmd/` (`configread`) | code | `verify` |
-| No third-party dependency of a core or shell package imports an I/O package, at any depth | `go.mod` | `verify`, from `go list -deps` |
+| No third-party dependency of a core or orchestrator package imports an I/O package, at any depth | `go.mod` | `verify`, from `go list -deps` |
 | `go.mod` and `go.sum` are tidy | `go.mod` | `verify`, with `go mod tidy -diff` |
 | No call reaches a function with a known vulnerability | code and `go.mod` | `verify`, with govulncheck |
 | In a `command` module, every function is reachable from a program in `cmd/` | code | `verify`, with deadcode |
@@ -49,7 +49,7 @@ Publish it with `github publish` from repo-tools.
 
 ## The layout the linters enforce
 
-[BASELINE.md](BASELINE.md) sets out the roles (core, shell, adapter, composition root), the rules for each and examples. Its source is `internal/core/baseline/BASELINE.md`. A package's directory decides its role: `RoleOf` in `baseline.go` and the paths in the golangci-lint template must agree. The analyzers use `RoleOf` too. depguard enforces the import rules; forbidigo bans the clock, printing and the global loggers outside `cmd/` and adapters; gocognit keeps every function but `cmd/`'s simple enough to review, and funlen keeps adapters thin and `cmd/` small. Test files are exempt from both, so integration tests can use real dependencies. The other linters cover the Go guide: exhaustive switches (`exhaustive`, `gochecksumtype`), no package-level state (`gochecknoglobals`, `gochecknoinits`), doc comments on exported names (`revive`), `errors.Is` and `errors.As` (`errorlint`), errors from other modules wrapped where they come in (`wrapcheck`) and `package foo_test` tests (`testpackage`). gosec, modernize and govet's nilness look for bugs and risky code. gosec's G204 and G304, running a command or opening a file named by a variable, are allowed in `cmd/` and adapters, whose job that is. gofumpt and goimports format.
+[BASELINE.md](BASELINE.md) sets out the roles (core, orchestrator, driving adapter, driven adapter, entrypoint), the rules for each and examples. Its source is `internal/core/baseline/BASELINE.md`. A package's directory decides its role: `RoleOf` in `baseline.go` and the paths in the golangci-lint template must agree. The analyzers use `RoleOf` too. depguard enforces the import rules; forbidigo bans the clock, printing and the global loggers outside `cmd/` and adapters; gocognit keeps every function but `cmd/`'s simple enough to review, and funlen keeps adapters thin and `cmd/` small. Test files are exempt from both, so integration tests can use real dependencies. The other linters cover the Go guide: exhaustive switches (`exhaustive`, `gochecksumtype`), no package-level state (`gochecknoglobals`, `gochecknoinits`), doc comments on exported names (`revive`), `errors.Is` and `errors.As` (`errorlint`), errors from other modules wrapped where they come in (`wrapcheck`) and `package foo_test` tests (`testpackage`). gosec, modernize and govet's nilness look for bugs and risky code. gosec's G204 and G304, running a command or opening a file named by a variable, are allowed in `cmd/` and adapters, whose job that is. gofumpt and goimports format.
 
 ## Tools considered
 
@@ -107,13 +107,28 @@ Rules that need a project's roles or type information across packages are analyz
 2. Add sample code to `internal/core/analyzers/testdata/src`, marking each line that should be reported with a ``// want `regexp` `` comment, and test it with `analysistest.Run`.
 3. Describe the rule in `BASELINE.md`, so agents meet it before the analyzer does.
 
-`verify` runs every analyzer over the project, through the adapter in `internal/adapters/gopackages`.
+`verify` runs every analyzer over the project, through the adapter in `internal/adapters/driven/gopackages`.
 
 golangci-lint can't extend a shared config, so a project can't add its own rules to `.golangci.yml`. When one needs to, add the option to the baseline.
 
+## The code rulebook
+
+The [code rulebook](https://github.com/ianflanagan1/code-rulebook) states the rules every language shares, split into clauses. `internal/core/rulebook` records which of go-baseline's checks enforce each clause and the tests that prove it. `rulebook-coverage.json` holds that listing. One test fails when the file is out of date or names a test that doesn't exist; another, `TestTheListingFitsThePinnedRulebook`, runs the pinned release of the rulebook's `check-listing` over it, which fails on a clause that applies to Go and isn't assessed, a role that isn't mapped, or a claim of full or partial coverage without proof.
+
+code-rulebook is a private repository, so that test needs Git access to it. Locally, have Git fetch it over SSH: `git config --global url."git@github.com:ianflanagan1/code-rulebook".insteadOf "https://github.com/ianflanagan1/code-rulebook"`. In CI, give the job a token that can read it.
+
+`TestConformance` in `internal/core/baseline` is the proof for the linters. It runs golangci-lint, with the config `write` generates, over `testdata/conformance`, which has a package for each violation the rulebook describes. Each subtest is named for its clause. `TestGoHasNoSyntaxFor` and `TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage` prove the claims Go itself enforces.
+
+When a check changes what it enforces, or the baseline moves to a new rulebook release:
+
+1. Bump `rulebookRelease` in `internal/core/rulebook/rulebook_test.go`, if moving.
+2. Assess each clause the test reports. Where an existing check reaches, add the violation to `testdata/conformance` and its expectation to `TestConformance`, or write another test that shows the check catching it. Where catching it needs a check go-baseline doesn't have, such as a new analyzer, record the coverage the existing checks give and write down what the missing check must do; it is built separately.
+3. Update the claim in `internal/core/rulebook/rulebook.go`.
+4. `devbox run -- task rulebook-coverage`, then `check`.
+
 ## Changing a shared setting
 
-1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, the tasks in `internal/core/baseline/Taskfile.yml`, or the constants in `baseline.go`. To let the core and shell use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint or go-task, change `GolangciLintVersion` or `TaskVersion` and the version in this repo's `devbox.json` together; this repo's own `verify` fails until they agree. Pin a GitHub Action in `check.yml` by its commit SHA, with the tag in a comment.
+1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, the tasks in `internal/core/baseline/Taskfile.yml`, or the constants in `baseline.go`. To let the core and orchestrators use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint or go-task, change `GolangciLintVersion` or `TaskVersion` and the version in this repo's `devbox.json` together; this repo's own `verify` fails until they agree. Pin a GitHub Action in `check.yml` by its commit SHA, with the tag in a comment.
 2. `devbox run -- task check`, commit, then `github release . minor`.
 3. In go-template and each project:
 
@@ -130,6 +145,7 @@ golangci-lint can't extend a shared config, so a project can't add its own rules
 | Command | What it does |
 |---|---|
 | `go tool go-baseline write [-kind <kind>]` | Writes `.golangci.yml` for the module in `go.mod` and the module kind (by default, the kind it already records), `BASELINE.md` and `.github/workflows/check.yml` |
-| `go tool go-baseline verify` | Lists each way the project differs from the baseline, including I/O dependencies of the core and shell and the analyzers' findings, and fails if there are any |
+| `go tool go-baseline verify` | Lists each way the project differs from the baseline, including I/O dependencies of the core and orchestrators, packages with no role and the analyzers' findings, and fails if there are any |
 | `go tool go-baseline test` | Runs the tests with coverage, and fails if a core package is below 80% |
-| `go tool go-baseline map` | Lists each package's role, the ports the shell declares and the adapters that implement them |
+| `go tool go-baseline map` | Lists each package's role, the ports the orchestrators declare and the driven adapters that implement them |
+| `go tool go-baseline rulebook` | Prints how the baseline enforces each clause of the [code rulebook](https://github.com/ianflanagan1/code-rulebook), as the coverage listing the rulebook checks |

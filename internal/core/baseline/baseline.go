@@ -69,8 +69,8 @@ const (
 	// PureLibrary is imported by other modules and does no I/O: every
 	// package is core.
 	PureLibrary Kind = "pure-library"
-	// Adapters is imported by other modules' composition roots and adapters:
-	// every package is an adapter.
+	// Adapters is imported by other modules' entrypoints and driven
+	// adapters: every package is a driven adapter.
 	Adapters Kind = "adapters"
 )
 
@@ -98,52 +98,90 @@ type Role int
 const (
 	// Core is the functional core: pure functions over values.
 	Core Role = iota + 1
-	// Shell gathers inputs through ports, calls the core and acts on the
-	// result.
-	Shell
-	// Adapter implements a port by doing I/O.
-	Adapter
-	// Root is a command's composition root, which builds adapters and
-	// passes them in.
-	Root
+	// Orchestrator is one use case: it gathers inputs through ports, calls
+	// the core and acts on the result.
+	Orchestrator
+	// DrivingAdapter turns calls from outside, such as HTTP requests or a
+	// command line, into calls to orchestrators.
+	DrivingAdapter
+	// DrivenAdapter implements a port by doing I/O.
+	DrivenAdapter
+	// Entrypoint is where a program starts: it reads the configuration,
+	// builds the adapters and orchestrators, and starts a driving adapter.
+	Entrypoint
 )
 
 func (r Role) String() string {
 	switch r {
 	case Core:
 		return "core"
-	case Shell:
-		return "shell"
-	case Adapter:
-		return "adapter"
-	case Root:
-		return "composition root"
+	case Orchestrator:
+		return "orchestrator"
+	case DrivingAdapter:
+		return "driving adapter"
+	case DrivenAdapter:
+		return "driven adapter"
+	case Entrypoint:
+		return "entrypoint"
 	}
 	return "Role(" + strconv.Itoa(int(r)) + ")"
 }
 
 // RoleOf returns the role of the package in dir, which is slash-separated and
 // relative to the module root ("" for the root). It matches the paths the
-// generated .golangci.yml uses.
-func RoleOf(kind Kind, dir string) Role {
+// generated .golangci.yml uses. It returns false for a package under an
+// adapters/ directory but in neither adapters/driving/ nor adapters/driven/,
+// which has no role.
+func RoleOf(kind Kind, dir string) (Role, bool) {
 	switch kind {
 	case PureLibrary:
-		return Core
+		return Core, true
 	case Adapters:
-		return Adapter
+		return DrivenAdapter, true
 	case Command:
 	}
 	segments := strings.Split(dir, "/")
-	switch {
-	case slices.Contains(segments, "cmd"):
-		return Root
-	case slices.Contains(segments, "adapters"):
-		return Adapter
-	case strings.Contains("/"+dir+"/", "/internal/core/"):
-		return Core
-	default:
-		return Shell
+	if slices.Contains(segments, "cmd") {
+		return Entrypoint, true
 	}
+	if i := slices.Index(segments, "adapters"); i >= 0 {
+		return adapterRole(segments[i+1:])
+	}
+	if strings.Contains("/"+dir+"/", "/internal/core/") {
+		return Core, true
+	}
+	return Orchestrator, true
+}
+
+// adapterRole returns the role of a package whose directory, below an
+// adapters/ directory, is below.
+func adapterRole(below []string) (Role, bool) {
+	if len(below) == 0 {
+		return 0, false
+	}
+	switch below[0] {
+	case "driving":
+		return DrivingAdapter, true
+	case "driven":
+		return DrivenAdapter, true
+	default:
+		return 0, false
+	}
+}
+
+// RolelessProblems reports each of the module's packages that has no
+// role: one under an adapters/ directory but in neither of its driving/ and
+// driven/ directories.
+func RolelessProblems(module string, kind Kind, packages []Package) []string {
+	var problems []string
+	for _, p := range sortedOwnPackages(module, packages) {
+		if _, ok := RoleOf(kind, relativeDir(module, p.ImportPath)); !ok {
+			problems = append(problems, fmt.Sprintf(
+				"%s has no role; move it to adapters/driving/ if it turns calls from outside into calls to orchestrators, or to adapters/driven/ if it implements a port",
+				p.ImportPath))
+		}
+	}
+	return problems
 }
 
 // Package is a package as `go list -json` describes it.
@@ -251,7 +289,7 @@ func IsIO(importPath string) bool {
 }
 
 // dependencyAllowlist lists third-party packages that import an I/O package
-// but are safe for the core and shell, each with the reason. Add one only
+// but are safe for the core and orchestrators, each with the reason. Add one only
 // after reading the code that projects call.
 func dependencyAllowlist() map[string]string {
 	return map[string]string{
@@ -390,6 +428,7 @@ func Verify(p Project) ([]string, error) {
 	}
 	problems = append(problems, devboxProblems(p.Devbox, p.GoMod)...)
 	problems = append(problems, layoutProblems(kind, p.Dirs)...)
+	problems = append(problems, RolelessProblems(module, kind, p.Packages)...)
 	problems = append(problems, DependencyProblems(module, kind, p.Packages)...)
 	return problems, nil
 }
@@ -485,14 +524,14 @@ func layoutProblems(kind Kind, dirs []string) []string {
 	return problems
 }
 
-// DependencyProblems reports each third-party package that a core or shell
-// package depends on, directly or through other packages, and that imports
+// DependencyProblems reports each third-party package that a core or
+// orchestrator package depends on, directly or through other packages, and that imports
 // an I/O package. The standard library is trusted: depguard checks the
 // module's own imports of it, and its pure packages import os themselves.
 func DependencyProblems(module string, kind Kind, packages []Package) []string {
 	r := reach{module: module, byPath: packagesByPath(packages), from: map[string]string{}}
 	for _, p := range sortedOwnPackages(module, packages) {
-		if role := RoleOf(kind, relativeDir(module, p.ImportPath)); role != Core && role != Shell {
+		if role, _ := RoleOf(kind, relativeDir(module, p.ImportPath)); role != Core && role != Orchestrator {
 			continue
 		}
 		for _, imported := range p.Imports {
@@ -537,7 +576,7 @@ func (r reach) ioProblems() []string {
 		for _, imported := range r.byPath[importPath].Imports {
 			if IsIO(imported) {
 				problems = append(problems, fmt.Sprintf(
-					"%s depends on %s, which imports %s; the core and shell can't depend on I/O, even indirectly",
+					"%s depends on %s, which imports %s; the core and orchestrators can't depend on I/O, even indirectly",
 					r.from[importPath], importPath, imported))
 			}
 		}
@@ -578,7 +617,7 @@ func ParseCoverage(output []byte) map[string]float64 {
 func CoverageProblems(module string, kind Kind, packages []Package, coverage map[string]float64) []string {
 	var problems []string
 	for _, p := range sortedOwnPackages(module, packages) {
-		if RoleOf(kind, relativeDir(module, p.ImportPath)) != Core {
+		if role, _ := RoleOf(kind, relativeDir(module, p.ImportPath)); role != Core {
 			continue
 		}
 		if percent, ok := coverage[p.ImportPath]; ok && percent < MinCoreCoverage {

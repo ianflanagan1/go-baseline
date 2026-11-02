@@ -103,7 +103,7 @@ func (b boundary) checkVariadic(arg ssa.Value, param types.Type, pos token.Pos) 
 			return
 		}
 	}
-	b.pass.Reportf(pos, "a slice of %s made outside the core is passed to it; pass the values one by one, or values the shell has read", elem)
+	b.pass.Reportf(pos, "a slice of %s made outside the core is passed to it; pass the values one by one, or values the orchestrator has read", elem)
 }
 
 func (b boundary) checkElementStores(element ssa.Instruction, elem types.Type, pos token.Pos) {
@@ -171,7 +171,7 @@ func (b boundary) checkValue(v ssa.Value, dest types.Type, pos token.Pos) {
 	case *ssa.MakeClosure:
 		b.pass.Reportf(pos, "a closure made outside the core is passed to it; pass the values it would read instead")
 	default:
-		b.pass.Reportf(pos, "a value of interface type %s, whose concrete type isn't known here, is passed to the core; pass values the shell has read instead", dest)
+		b.pass.Reportf(pos, "a value of interface type %s, whose concrete type isn't known here, is passed to the core; pass values the orchestrator has read instead", dest)
 	}
 }
 

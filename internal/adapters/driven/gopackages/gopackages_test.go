@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ianflanagan1/go-baseline/internal/adapters/gopackages"
+	"github.com/ianflanagan1/go-baseline/internal/adapters/driven/gopackages"
 	"github.com/ianflanagan1/go-baseline/internal/core/analyzers"
 	"github.com/ianflanagan1/go-baseline/internal/core/baseline"
 )

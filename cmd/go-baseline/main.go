@@ -3,7 +3,8 @@
 // `verify` fails when the project has drifted from the baseline, breaks an
 // architecture rule, has an untidy go.mod or calls a known vulnerability;
 // `test` runs the tests and fails when a core package's
-// coverage is too low; `map` describes the project's architecture.
+// coverage is too low; `map` describes the project's architecture;
+// `rulebook` prints how the baseline enforces the code rulebook.
 package main
 
 import (
@@ -20,14 +21,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ianflanagan1/go-baseline/internal/adapters/gopackages"
+	"github.com/ianflanagan1/go-baseline/internal/adapters/driven/gopackages"
 	"github.com/ianflanagan1/go-baseline/internal/core/analyzers"
 	"github.com/ianflanagan1/go-baseline/internal/core/baseline"
 	"github.com/ianflanagan1/go-baseline/internal/core/projectmap"
+	"github.com/ianflanagan1/go-baseline/internal/core/rulebook"
 	"golang.org/x/vuln/scan"
 )
 
-const usage = "usage: go-baseline write [-kind command|pure-library|adapters] | verify | test | map"
+const usage = "usage: go-baseline write [-kind command|pure-library|adapters] | verify | test | map | rulebook"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -52,6 +54,10 @@ func run(args []string) error {
 		case "map":
 			if len(args) == 1 {
 				return describe()
+			}
+		case "rulebook":
+			if len(args) == 1 {
+				return writeListing()
 			}
 		}
 	}
@@ -370,4 +376,13 @@ func projectDirs() ([]string, error) {
 		return nil, fmt.Errorf("listing directories: %w", err)
 	}
 	return dirs, nil
+}
+
+// writeListing prints the baseline's coverage listing for the code
+// rulebook, which the module keeps in rulebook-coverage.json.
+func writeListing() error {
+	if _, err := os.Stdout.Write(rulebook.Listing()); err != nil {
+		return fmt.Errorf("writing the listing: %w", err)
+	}
+	return nil
 }

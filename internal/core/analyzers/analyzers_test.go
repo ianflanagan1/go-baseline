@@ -26,7 +26,7 @@ func TestCoreBoundary(t *testing.T) {
 func TestConfigRead(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), analyzers.ConfigRead(project(baseline.Command)),
 		"example.com/app/internal/core/rates", "example.com/app/internal/config",
-		"example.com/app/internal/adapters/store", "example.com/app/cmd/config")
+		"example.com/app/internal/adapters/driven/store", "example.com/app/cmd/config")
 }
 
 func TestAnAdaptersModuleMayReadConfiguration(t *testing.T) {

@@ -66,9 +66,10 @@ linters:
             - pkg: {{.Module}}
               desc: the core imports only the core
 {{- template "coreDenies" .}}
-        # The shell reaches outside dependencies only through ports, as
-        # adapters that cmd/ wires in.
-        shell:
+        # Orchestrators reach outside dependencies only through the ports
+        # they declare, which driven adapters implement and the entrypoint
+        # in cmd/ passes in.
+        orchestrators:
           list-mode: lax
           files:
             - $all
@@ -81,28 +82,38 @@ linters:
 {{- end}}
           deny:
             - pkg: {{.Module}}/internal/adapters
-              desc: reach adapters through their ports; wire them in cmd/
+              desc: take driven adapters through the ports you declare; the entrypoint in cmd/ wires them in
 {{- range .IOPackages}}
             - pkg: {{.}}
               desc: reach outside dependencies through ports
 {{- end}}
-        # Adapters translate between a port and the outside world. They may
-        # use the core's types, but not the shell, so decisions stay out of
-        # them.
-        adapters:
+        # Driving adapters turn calls from outside into calls to
+        # orchestrators, which they import. They never reach a driven
+        # adapter: every use case goes through an orchestrator.
+        driving-adapters:
           list-mode: lax
           files:
-            - "**/adapters/**"
+            - "**/adapters/driving/**"
+            - "!$test"
+          deny:
+            - pkg: {{.Module}}/internal/adapters/driven
+              desc: a driving adapter reaches outside dependencies only by calling an orchestrator
+        # Driven adapters implement the ports orchestrators declare. They may
+        # use the core's types, but never an orchestrator or a driving
+        # adapter, so decisions stay out of them.
+        driven-adapters:
+          list-mode: lax
+          files:
+            - "**/adapters/driven/**"
             - "!$test"
           allow:
             - {{.Module}}/internal/core
-            - {{.Module}}/internal/adapters
-            - {{.Module}}/adapters
+            - {{.Module}}/internal/adapters/driven
           deny:
             - pkg: {{.Module}}
-              desc: adapters don't call the shell; keep decisions out of them
+              desc: a driven adapter imports only the core and other driven adapters; keep decisions out of it
 {{- end}}
-        # The composition root builds the adapters and passes them in by
+        # The entrypoint builds the adapters and passes them in by
         # hand, so the wiring is plain code that reads top to bottom.
         containers:
           list-mode: lax
@@ -162,7 +173,8 @@ linters:
           - gosec
           - wrapcheck
 {{- if eq .Kind "adapters"}}
-      # Running commands and opening files by name is what adapters are for.
+      # Running commands and opening files by name is what driven adapters
+      # are for.
       - text: G204|G304
         linters:
           - gosec
@@ -171,19 +183,19 @@ linters:
       - path: (^|/)(cmd|adapters)/
         linters:
           - forbidigo
-      # Running commands and opening files by name is what adapters and the
-      # composition root are for.
+      # Running commands and opening files by name is what adapters and
+      # entrypoints are for.
       - path: (^|/)(cmd|adapters)/
         text: G204|G304
         linters:
           - gosec
-      # Adapters and the composition root are kept thin and small; the core
-      # and shell are limited by their own rules instead.
+      # Adapters and entrypoints are kept thin and small; the core and
+      # orchestrators are limited by their own rules instead.
       - path-except: (^|/)(cmd|adapters)/
         linters:
           - funlen
 {{- if eq .Kind "command"}}
-      # The composition root is limited by funlen instead. Everywhere else
+      # The entrypoint is limited by funlen instead. Everywhere else
       # a function stays simple enough to review: decisions in the core are
       # split into named functions rather than nested.
       - path: (^|/)cmd/
@@ -198,7 +210,7 @@ formatters:
     - goimports
 {{- define "coreDenies"}}
             - pkg: context
-              desc: the core takes values, not a context; I/O happens in the shell
+              desc: the core takes values, not a context; I/O happens in adapters
             - pkg: log
               desc: the core does no I/O
 {{- range .IOPackages}}
