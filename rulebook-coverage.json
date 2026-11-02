@@ -99,6 +99,11 @@
       "tool": "golangci-lint",
       "summary": "ineffassign: no assigned value goes unread."
     },
+    "modifies-parameter": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "revive's modifies-parameter rule, at confidence 0.5: no function assigns to one of its parameters, including from a closure."
+    },
     "nodefault": {
       "kind": "custom",
       "summary": "Analyzer: a switch on the project's own enum, or a type switch on its own sealed interface, has no default arm."
@@ -478,7 +483,13 @@
       ]
     },
     "parameters-are-not-reassigned": {
-      "coverage": "none"
+      "coverage": "full",
+      "checks": [
+        "modifies-parameter"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/parameters-are-not-reassigned"
+      ]
     },
     "port-units-follow-typing": {
       "case": "structural",

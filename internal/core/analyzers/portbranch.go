@@ -285,20 +285,20 @@ func (s shell) spread(fn *ssa.Function, tainted map[ssa.Value]bool, ports bool) 
 
 // taints returns the values that instr taints, given those already tainted.
 func (s shell) taints(instr ssa.Instruction, tainted map[ssa.Value]bool, ports bool) []ssa.Value {
-	switch instr := instr.(type) {
+	switch in := instr.(type) {
 	case *ssa.Store:
-		if tainted[instr.Val] {
-			return referents(instr.Addr)
+		if tainted[in.Val] {
+			return referents(in.Addr)
 		}
 		return nil
 	case ssa.CallInstruction:
-		return s.callTaints(instr, tainted, ports)
+		return s.callTaints(in, tainted, ports)
 	case *ssa.Extract:
-		if sel, isSelect := instr.Tuple.(*ssa.Select); isSelect {
-			return selectTaints(instr, sel, tainted)
+		if sel, isSelect := in.Tuple.(*ssa.Select); isSelect {
+			return selectTaints(in, sel, tainted)
 		}
 	case *ssa.BinOp:
-		if isErrorNilCheck(instr) {
+		if isErrorNilCheck(in) {
 			return nil
 		}
 	}
@@ -373,28 +373,38 @@ func (s shell) calleeTaints(callee *ssa.Function, args []ssa.Value, tainted map[
 // that a store or a call may write: a pointer, slice or map, or an
 // interface holding one.
 func referents(v ssa.Value) []ssa.Value {
-	if mi, ok := v.(*ssa.MakeInterface); ok {
-		v = mi.X
-	}
-	switch v.Type().Underlying().(type) {
+	value := held(v)
+	switch value.Type().Underlying().(type) {
 	case *types.Pointer, *types.Slice, *types.Map:
 	default:
 		return nil
 	}
-	out := []ssa.Value{v}
-	for {
-		switch addr := v.(type) {
-		case *ssa.FieldAddr:
-			v = addr.X
-		case *ssa.IndexAddr:
-			v = addr.X
-		case *ssa.Slice:
-			v = addr.X
-		default:
-			return out
-		}
-		out = append(out, v)
+	return append([]ssa.Value{value}, origins(value)...)
+}
+
+// held returns the value an interface made from it holds, or v.
+func held(v ssa.Value) ssa.Value {
+	if mi, ok := v.(*ssa.MakeInterface); ok {
+		return mi.X
 	}
+	return v
+}
+
+// origins returns what v's memory was taken from, nearest first: the
+// struct, array or slice whose field, element or part it is.
+func origins(v ssa.Value) []ssa.Value {
+	var from ssa.Value
+	switch addr := v.(type) {
+	case *ssa.FieldAddr:
+		from = addr.X
+	case *ssa.IndexAddr:
+		from = addr.X
+	case *ssa.Slice:
+		from = addr.X
+	default:
+		return nil
+	}
+	return append([]ssa.Value{from}, origins(from)...)
 }
 
 // selectTaints returns extract, a result of sel, when it's tainted.
@@ -475,11 +485,11 @@ func sourcePos(v ssa.Value, seen map[ssa.Value]bool) token.Pos {
 	if v.Pos().IsValid() {
 		return v.Pos()
 	}
-	switch v := v.(type) {
+	switch value := v.(type) {
 	case *ssa.Extract:
-		return sourcePos(v.Tuple, seen)
+		return sourcePos(value.Tuple, seen)
 	case *ssa.Phi:
-		return firstSourcePos(v.Edges, seen)
+		return firstSourcePos(value.Edges, seen)
 	}
 	return token.NoPos
 }

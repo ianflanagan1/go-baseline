@@ -103,6 +103,13 @@ func TestConformance(t *testing.T) {
 			{"gochecksumtype", "internal/core/missingvariant"}, {"exhaustive", "internal/core/missingvalue"},
 		},
 		"matches-on-closed-families-have-no-default-arm": {{"exhaustive", "internal/core/enumdefault"}},
+		"parameters-are-not-reassigned": {
+			{"revive", "internal/core/assignedparameter"},
+			{"revive", "internal/core/compoundparameter"},
+			{"revive", "internal/core/incrementedparameter"},
+			{"revive", "internal/core/defaultedparameter"},
+			{"revive", "internal/core/closureparameter"},
+		},
 		"returned-failures-are-used": {
 			{"errcheck", "internal/core/droppederror"}, {"ineffassign", "internal/core/unreadsentinel"},
 		},

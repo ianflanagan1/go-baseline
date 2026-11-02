@@ -167,9 +167,14 @@ linters:
       enable:
         - nilness
     revive:
+      # modifies-parameter reports at confidence 0.5, below revive's default
+      # threshold of 0.8.
+      confidence: 0.5
       enable-default-rules: true
       rules:
         - name: exported
+        # A parameter holds the argument it was given for the whole function.
+        - name: modifies-parameter
     wrapcheck:
       # The module's own packages wrap their errors with context; wrap those
       # from other modules where they come in.

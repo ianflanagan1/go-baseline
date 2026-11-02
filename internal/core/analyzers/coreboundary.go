@@ -92,11 +92,11 @@ func (b boundary) checkVariadic(arg ssa.Value, param types.Type, pos token.Pos) 
 	if !canHideIO(elem) {
 		return
 	}
-	switch arg := arg.(type) {
+	switch a := arg.(type) {
 	case *ssa.Const:
 		return
 	case *ssa.Slice:
-		if array, ok := arg.X.(*ssa.Alloc); ok {
+		if array, ok := a.X.(*ssa.Alloc); ok {
 			for _, element := range *array.Referrers() {
 				b.checkElementStores(element, elem, pos)
 			}
@@ -153,26 +153,32 @@ func (b boundary) checkValue(v ssa.Value, dest types.Type, pos token.Pos) {
 	if !canHideIO(dest) {
 		return
 	}
-	if pos == token.NoPos {
-		pos = v.Pos()
-	}
-	switch v := v.(type) {
+	at := reportAt(pos, v)
+	switch value := v.(type) {
 	case *ssa.Const:
 	case *ssa.MakeInterface:
-		if _, isFunc := v.X.Type().Underlying().(*types.Signature); isFunc {
-			b.checkValue(v.X, v.X.Type(), pos)
-		} else if hasMethods(v.X.Type()) && !b.isPureType(v.X.Type()) {
-			b.pass.Reportf(pos, "%s may do I/O and is passed to the core as %s; the core takes only pure types", v.X.Type(), dest)
+		if _, isFunc := value.X.Type().Underlying().(*types.Signature); isFunc {
+			b.checkValue(value.X, value.X.Type(), at)
+		} else if hasMethods(value.X.Type()) && !b.isPureType(value.X.Type()) {
+			b.pass.Reportf(at, "%s may do I/O and is passed to the core as %s; the core takes only pure types", value.X.Type(), dest)
 		}
 	case *ssa.Function:
-		if !b.project.isCore(functionPackage(v)) {
-			b.pass.Reportf(pos, "function %s is declared outside the core and passed to it; the core takes only its own functions", v.Name())
+		if !b.project.isCore(functionPackage(value)) {
+			b.pass.Reportf(at, "function %s is declared outside the core and passed to it; the core takes only its own functions", value.Name())
 		}
 	case *ssa.MakeClosure:
-		b.pass.Reportf(pos, "a closure made outside the core is passed to it; pass the values it would read instead")
+		b.pass.Reportf(at, "a closure made outside the core is passed to it; pass the values it would read instead")
 	default:
-		b.pass.Reportf(pos, "a value of interface type %s, whose concrete type isn't known here, is passed to the core; pass values the orchestrator has read instead", dest)
+		b.pass.Reportf(at, "a value of interface type %s, whose concrete type isn't known here, is passed to the core; pass values the orchestrator has read instead", dest)
 	}
+}
+
+// reportAt returns pos, or v's position when pos is unknown.
+func reportAt(pos token.Pos, v ssa.Value) token.Pos {
+	if pos == token.NoPos {
+		return v.Pos()
+	}
+	return pos
 }
 
 // canHideIO reports whether a value of type t can run code that isn't
@@ -208,22 +214,24 @@ func functionPackage(fn *ssa.Function) *types.Package {
 
 func hasMethods(t types.Type) bool {
 	if _, isPointer := t.Underlying().(*types.Pointer); !isPointer {
-		t = types.NewPointer(t)
+		return types.NewMethodSet(types.NewPointer(t)).Len() > 0
 	}
 	return types.NewMethodSet(t).Len() > 0
+}
+
+// dereferenced returns what t points to, through any number of pointers, or
+// t when it isn't a pointer.
+func dereferenced(t types.Type) types.Type {
+	if pointer, ok := t.Underlying().(*types.Pointer); ok {
+		return dereferenced(pointer.Elem())
+	}
+	return t
 }
 
 // isPureType reports whether t is declared in a pure package, with any type
 // arguments pure too.
 func (b boundary) isPureType(t types.Type) bool {
-	for {
-		pointer, ok := t.Underlying().(*types.Pointer)
-		if !ok {
-			break
-		}
-		t = pointer.Elem()
-	}
-	named, ok := types.Unalias(t).(*types.Named)
+	named, ok := types.Unalias(dereferenced(t)).(*types.Named)
 	if !ok {
 		return true
 	}

@@ -77,6 +77,7 @@ A core function earns its place by making a decision its test states. One that o
 | Reading configuration: environment variables, flags, `os.Args`, the env adapter | Banned | Banned | Banned | Banned | Allowed: read it all here and pass the values in |
 | The module's own packages | Core only | Core and orchestrators | Anything but driven adapters | Core and other driven adapters | Anything |
 | Size | Cognitive complexity at most 10 | Cognitive complexity at most 10 | Cognitive complexity at most 10, functions at most 50 lines and 30 statements | Cognitive complexity at most 10, functions at most 50 lines and 30 statements | Functions at most 50 lines and 30 statements |
+| Parameters | Never reassigned | Never reassigned | Never reassigned | Never reassigned | Never reassigned |
 
 Test files are exempt from the purity and size rules, so integration tests can use real dependencies.
 
@@ -358,4 +359,5 @@ I/O shared by several projects goes in an `adapters` module, such as go-adapters
 - A closed family of variants is a sum type: an interface with an unexported marker method, such as `isStep()`, so only its own package can implement it, marked with a `//sumtype:decl` comment. `verify` reports a sealed interface without the comment.
 - Switches over enums and sum types name every case and have no `default` arm, so adding a value or a variant fails the lint at every switch that must handle it. List cases that share a branch in one `case`. `verify` reports a `default` arm in a switch on the module's own enum or sum type.
 - Wire by hand in `cmd/`: construct each adapter and pass it in. The linters ban dependency-injection containers such as fx and dig.
+- No function assigns to one of its parameters, even from a closure; give a derived value its own name. revive's modifies-parameter rule reports it.
 - Tests are in `package foo_test` and use the public API.

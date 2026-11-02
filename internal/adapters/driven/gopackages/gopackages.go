@@ -18,11 +18,11 @@ import (
 // diagnostic as "file:line:col: message (analyzer)", with file relative to
 // dir, sorted.
 func Analyze(dir string, analyzers []*analysis.Analyzer) ([]string, error) {
-	dir, err := filepath.Abs(dir)
+	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("finding %s: %w", dir, err)
 	}
-	pkgs, err := load(dir, packages.LoadAllSyntax)
+	pkgs, err := load(abs, packages.LoadAllSyntax)
 	if err != nil {
 		return nil, err
 	}

@@ -101,6 +101,7 @@ func checks() map[string]check {
 		"ineffassign":               lint("ineffassign: no assigned value goes unread."),
 		"unused-variables":          language("The Go compiler rejects a local variable that is declared and never used."),
 		"go-syntax":                 language("Go has no class inheritance, default or optional parameters, or field initialisers; the parser rejects the syntax other languages use for them."),
+		"modifies-parameter":        lint("revive's modifies-parameter rule, at confidence 0.5: no function assigns to one of its parameters, including from a closure."),
 		"golangci-fmt":              lint("golangci-lint fmt --diff, which the lint task runs, fails on any file gofumpt or goimports would change."),
 		"verify-config":             custom("verify reports a .golangci.yml or Taskfile.yml that differs from the one the baseline generates."),
 	}
@@ -247,7 +248,9 @@ func claims() map[string]claim {
 		"arguments-are-not-mutated":                {Coverage: "none"},
 		"fields-are-assigned-only-at-construction": {Coverage: "none"},
 		"field-collections-are-not-changed":        {Coverage: "none"},
-		"parameters-are-not-reassigned":            {Coverage: "none"},
+		"parameters-are-not-reassigned": {
+			Coverage: "full", Checks: []string{"modifies-parameter"}, Proof: conformance("parameters-are-not-reassigned"),
+		},
 		"core-locals-are-not-reassigned-once-read": {Case: "unsupported", Coverage: "none"},
 		"returned-failures-are-used": {
 			Coverage: "partial", Checks: []string{"errcheck", "ineffassign", "unused-variables"},
