@@ -341,4 +341,5 @@ I/O shared by several projects goes in an `adapters` module, such as go-adapters
 - Wrap errors with `%w` and context (`fmt.Errorf("reading %s: %w", name, err)`); compare them with `errors.Is` and `errors.As`.
 - A closed family of variants is a sum type: an interface with an unexported marker method, such as `isStep()`, so only its own package can implement it, marked with a `//sumtype:decl` comment. `verify` reports a sealed interface without the comment.
 - Switches over enums and sum types name every case and have no `default` arm, so adding a value or a variant fails the lint at every switch that must handle it. List cases that share a branch in one `case`. `verify` reports a `default` arm in a switch on the module's own enum or sum type.
+- Wire by hand in `cmd/`: construct each adapter and pass it in. The linters ban dependency-injection containers such as fx and dig.
 - Tests are in `package foo_test` and use the public API.

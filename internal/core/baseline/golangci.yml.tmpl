@@ -102,6 +102,17 @@ linters:
             - pkg: {{.Module}}
               desc: adapters don't call the shell; keep decisions out of them
 {{- end}}
+        # The composition root builds the adapters and passes them in by
+        # hand, so the wiring is plain code that reads top to bottom.
+        containers:
+          list-mode: lax
+          files:
+            - $all
+          deny:
+{{- range .Containers}}
+            - pkg: {{.}}
+              desc: wire by hand in cmd/; construct each adapter and pass it in
+{{- end}}
 {{- end}}
     errorlint:
       errorf: true

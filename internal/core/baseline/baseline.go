@@ -232,6 +232,13 @@ func ioExceptions() []string {
 	return []string{"net/mail", "net/netip", "net/url"}
 }
 
+// containers are the dependency-injection containers and service locators
+// that build an object graph at run time, matched with their subpackages.
+// Wire is left out: it generates the wiring as plain code.
+func containers() []string {
+	return []string{"github.com/goioc/di", "github.com/golobby/container", "github.com/samber/do", "go.uber.org/dig", "go.uber.org/fx"}
+}
+
 // IsIO reports whether the standard library package at importPath does I/O
 // or is non-deterministic.
 func IsIO(importPath string) bool {
@@ -313,7 +320,8 @@ func GolangciConfig(modulePath string, kind Kind) ([]byte, error) {
 		Kind         Kind
 		IOPackages   []string
 		IOExceptions []string
-	}{modulePath, kind, ioPackages(), ioExceptions()})
+		Containers   []string
+	}{modulePath, kind, ioPackages(), ioExceptions(), containers()})
 	if err != nil {
 		return nil, fmt.Errorf("rendering the golangci-lint template: %w", err)
 	}

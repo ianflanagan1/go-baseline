@@ -111,6 +111,23 @@ linters:
           deny:
             - pkg: github.com/ianflanagan1/go-baseline
               desc: adapters don't call the shell; keep decisions out of them
+        # The composition root builds the adapters and passes them in by
+        # hand, so the wiring is plain code that reads top to bottom.
+        containers:
+          list-mode: lax
+          files:
+            - $all
+          deny:
+            - pkg: github.com/goioc/di
+              desc: wire by hand in cmd/; construct each adapter and pass it in
+            - pkg: github.com/golobby/container
+              desc: wire by hand in cmd/; construct each adapter and pass it in
+            - pkg: github.com/samber/do
+              desc: wire by hand in cmd/; construct each adapter and pass it in
+            - pkg: go.uber.org/dig
+              desc: wire by hand in cmd/; construct each adapter and pass it in
+            - pkg: go.uber.org/fx
+              desc: wire by hand in cmd/; construct each adapter and pass it in
     errorlint:
       errorf: true
       asserts: true
