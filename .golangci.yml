@@ -73,8 +73,9 @@ linters:
         orchestrators:
           list-mode: lax
           files:
-            - $all
+            - "**/orchestrators/**"
             - "!$test"
+            - "!**/core/**"
             - "!**/cmd/**"
             - "!**/adapters/**"
           allow:

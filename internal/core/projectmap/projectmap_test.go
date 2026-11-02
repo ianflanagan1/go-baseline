@@ -16,9 +16,9 @@ import (
 func sources() []struct{ path, src string } {
 	return []struct{ path, src string }{
 		{"example.com/sdk", "package sdk\n\ntype Mailer struct{}\n\nfunc (*Mailer) Notify(string) error { return nil }\n"},
-		{"example.com/app/internal/app", "package app\n\ntype Clock interface{ Now() int }\n\ntype Notifier interface{ Notify(string) error }\n\ntype Store interface{ Save() }\n\ntype Empty interface{}\n\ntype Report struct{}\n"},
+		{"example.com/app/internal/orchestrators/app", "package app\n\ntype Clock interface{ Now() int }\n\ntype Notifier interface{ Notify(string) error }\n\ntype Store interface{ Save() }\n\ntype Empty interface{}\n\ntype Report struct{}\n"},
 		{"example.com/app/internal/adapters/driven/clock", "package clock\n\ntype System struct{}\n\nfunc (System) Now() int { return 0 }\n"},
-		{"example.com/app/cmd/app", "package main\n\nimport (\n\t\"example.com/app/internal/adapters/driven/clock\"\n\t\"example.com/app/internal/app\"\n\t\"example.com/sdk\"\n)\n\nvar _ app.Clock = clock.System{}\n\nvar _ = &sdk.Mailer{}\n"},
+		{"example.com/app/cmd/app", "package main\n\nimport (\n\t\"example.com/app/internal/adapters/driven/clock\"\n\t\"example.com/app/internal/orchestrators/app\"\n\t\"example.com/sdk\"\n)\n\nvar _ app.Clock = clock.System{}\n\nvar _ = &sdk.Mailer{}\n"},
 	}
 }
 
@@ -53,7 +53,7 @@ func TestPortsAreMatchedToAdaptersAndThirdPartyTypes(t *testing.T) {
 	want := []projectmap.Package{
 		{Path: "example.com/app/cmd/app", Role: baseline.Entrypoint, HasRole: true},
 		{Path: "example.com/app/internal/adapters/driven/clock", Role: baseline.DrivenAdapter, HasRole: true},
-		{Path: "example.com/app/internal/app", Role: baseline.Orchestrator, HasRole: true, Ports: []projectmap.Port{
+		{Path: "example.com/app/internal/orchestrators/app", Role: baseline.Orchestrator, HasRole: true, Ports: []projectmap.Port{
 			{Name: "Clock", Implementations: []string{"clock.System (example.com/app/internal/adapters/driven/clock)"}},
 			{Name: "Notifier", Implementations: []string{"sdk.Mailer (example.com/sdk)"}},
 			{Name: "Store"},
@@ -75,7 +75,7 @@ func TestTheFormatShowsRolesAndMissingImplementations(t *testing.T) {
 
 func TestAPackageWithNoRoleIsShownAsOne(t *testing.T) {
 	got := projectmap.Format([]projectmap.Package{{Path: "example.com/app/internal/adapters/clock"}})
-	if !strings.Contains(got, "example.com/app/internal/adapters/clock  no role: move it to adapters/driving/ or adapters/driven/") {
+	if !strings.Contains(got, "example.com/app/internal/adapters/clock  no role: move it into a role's directory") {
 		t.Errorf("got\n%s", got)
 	}
 }

@@ -50,7 +50,7 @@ func Describe(module string, pkgs []*types.Package) []Package {
 func Format(packages []Package) string {
 	var rows [][2]string
 	for _, p := range packages {
-		role := "no role: move it to adapters/driving/ or adapters/driven/"
+		role := "no role: move it into a role's directory"
 		if p.HasRole {
 			role = p.Role.String()
 		}

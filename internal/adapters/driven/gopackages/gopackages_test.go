@@ -30,14 +30,14 @@ func module(t *testing.T, files map[string]string) string {
 
 func TestDiagnosticsAreReportedRelativeToTheModule(t *testing.T) {
 	dir := module(t, map[string]string{
-		"internal/app/app.go": "package app\n\nimport \"os\"\n\nfunc Token() string { return os.Getenv(\"TOKEN\") }\n",
+		"internal/orchestrators/app/app.go": "package app\n\nimport \"os\"\n\nfunc Token() string { return os.Getenv(\"TOKEN\") }\n",
 	})
 	project := analyzers.Project{Module: "example.com/t"}
 	got, err := gopackages.Analyze(dir, analyzers.All(project))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || !strings.HasPrefix(got[0], "internal/app/app.go:5:33: os.Getenv reads configuration") {
+	if len(got) != 1 || !strings.HasPrefix(got[0], "internal/orchestrators/app/app.go:5:33: os.Getenv reads configuration") {
 		t.Fatalf("got %q", got)
 	}
 }

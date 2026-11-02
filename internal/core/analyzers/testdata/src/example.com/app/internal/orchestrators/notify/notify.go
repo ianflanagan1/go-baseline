@@ -3,7 +3,7 @@ package notify
 import (
 	"context"
 
-	"example.com/app/internal/orders"
+	"example.com/app/internal/orchestrators/orders"
 )
 
 func Notify(ctx context.Context, store orders.Store) {

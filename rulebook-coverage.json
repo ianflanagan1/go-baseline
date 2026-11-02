@@ -6,7 +6,7 @@
     "driven-adapter": "Packages under an adapters/driven/ directory.",
     "driving-adapter": "Packages under an adapters/driving/ directory.",
     "entrypoint": "Packages under cmd/.",
-    "orchestrator": "Every other package, outside cmd/ and adapters/."
+    "orchestrator": "Packages under an orchestrators/ directory, such as internal/orchestrators/."
   },
   "checks": {
     "configread": {
@@ -142,7 +142,7 @@
     },
     "verify-roles": {
       "kind": "custom",
-      "summary": "verify reports a package under adapters/ that is in neither adapters/driving/ nor adapters/driven/, which has no role."
+      "summary": "verify reports a package outside every role's directory, which has no role."
     }
   },
   "clauses": {
@@ -329,7 +329,7 @@
       ],
       "proof": [
         "internal/core/baseline: TestRolesFollowThePath",
-        "internal/core/baseline: TestAnAdapterInNeitherDrivingNorDrivenHasNoRole",
+        "internal/core/baseline: TestAPackageOutsideEveryRolesDirectoryHasNoRole",
         "internal/core/baseline: TestAPackageWithNoRoleIsReported"
       ]
     },

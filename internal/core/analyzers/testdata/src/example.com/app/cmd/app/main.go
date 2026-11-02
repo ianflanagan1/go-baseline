@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"example.com/app/internal/app"
+	"example.com/app/internal/orchestrators/app"
 	"example.com/app/internal/core/rates"
 	"example.com/sdk"
 )

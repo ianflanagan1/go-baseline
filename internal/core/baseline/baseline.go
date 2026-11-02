@@ -97,8 +97,9 @@ func (r Role) String() string {
 // RoleOf returns the role of the package in dir, which is slash-separated and
 // relative to the module root ("" for the root). Only the directory decides
 // it, in every module. It matches the paths the generated .golangci.yml uses.
-// It returns false for a package under an adapters/ directory but in neither
-// adapters/driving/ nor adapters/driven/, which has no role.
+// It returns false for a package outside every role's directory, which has no
+// role: one under no cmd/, core/, orchestrators/, adapters/driving/ or
+// adapters/driven/ directory.
 func RoleOf(dir string) (Role, bool) {
 	segments := strings.Split(dir, "/")
 	if slices.Contains(segments, "cmd") {
@@ -107,10 +108,14 @@ func RoleOf(dir string) (Role, bool) {
 	if i := slices.Index(segments, "adapters"); i >= 0 {
 		return adapterRole(segments[i+1:])
 	}
-	if slices.Contains(segments, "core") {
+	switch {
+	case slices.Contains(segments, "core"):
 		return Core, true
+	case slices.Contains(segments, "orchestrators"):
+		return Orchestrator, true
+	default:
+		return 0, false
 	}
-	return Orchestrator, true
 }
 
 // adapterRole returns the role of a package whose directory, below an
@@ -130,14 +135,13 @@ func adapterRole(below []string) (Role, bool) {
 }
 
 // RolelessProblems reports each of the module's packages that has no
-// role: one under an adapters/ directory but in neither of its driving/ and
-// driven/ directories.
+// role: one outside every role's directory.
 func RolelessProblems(module string, packages []Package) []string {
 	var problems []string
 	for _, p := range sortedOwnPackages(module, packages) {
 		if _, ok := RoleOf(relativeDir(module, p.ImportPath)); !ok {
 			problems = append(problems, fmt.Sprintf(
-				"%s has no role; move it to adapters/driving/ if it turns calls from outside into calls to orchestrators, or to adapters/driven/ if it implements a port",
+				"%s has no role; move it under core/ if it decides, orchestrators/ if it runs a use case, adapters/driving/ if it turns calls from outside into calls to orchestrators, or adapters/driven/ if it implements a port",
 				p.ImportPath))
 		}
 	}

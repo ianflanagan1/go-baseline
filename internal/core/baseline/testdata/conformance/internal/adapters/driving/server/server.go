@@ -3,7 +3,7 @@
 package server
 
 import (
-	"example.com/conformance/internal/app"
+	"example.com/conformance/internal/orchestrators/app"
 )
 
 // Handle answers a request by calling an orchestrator.

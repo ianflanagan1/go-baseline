@@ -18,12 +18,12 @@ func project() analyzers.Project {
 
 func TestCoreBoundary(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), analyzers.CoreBoundary(project()),
-		"example.com/app/internal/app", "example.com/app/cmd/app")
+		"example.com/app/internal/orchestrators/app", "example.com/app/cmd/app")
 }
 
 func TestConfigRead(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), analyzers.ConfigRead(project()),
-		"example.com/app/internal/core/rates", "example.com/app/internal/config",
+		"example.com/app/internal/core/rates", "example.com/app/internal/orchestrators/config",
 		"example.com/app/internal/adapters/driven/store", "example.com/app/cmd/config")
 }
 
@@ -51,7 +51,7 @@ func TestSumTypeDecl(t *testing.T) {
 
 func TestPortBranch(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), analyzers.PortBranch(project()),
-		"example.com/app/internal/orders", "example.com/app/internal/notify",
+		"example.com/app/internal/orchestrators/orders", "example.com/app/internal/orchestrators/notify",
 		"example.com/app/internal/core/pricing")
 }
 
@@ -64,7 +64,7 @@ func (ignoreExpectations) Errorf(string, ...any) {}
 func TestTheGuidesExamplesPassEveryAnalyzer(t *testing.T) {
 	for _, a := range analyzers.All(project()) {
 		t.Run(a.Name, func(t *testing.T) {
-			results := analysistest.Run(ignoreExpectations{}, analysistest.TestData(), a, "example.com/app/internal/guide", "example.com/app/internal/core/lookup")
+			results := analysistest.Run(ignoreExpectations{}, analysistest.TestData(), a, "example.com/app/internal/orchestrators/guide", "example.com/app/internal/core/lookup")
 			if len(results) == 0 {
 				t.Fatal("the guide's examples didn't load")
 			}

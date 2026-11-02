@@ -24,12 +24,12 @@ A package's directory decides its role, and its role decides its rules:
 | Role | Directory | Does I/O | Tested with |
 |---|---|---|---|
 | Core | `internal/core/...`; in a library, `core/...` | Never, even through a dependency | Table-driven tests over values. At least 80% statement coverage per package. |
-| Orchestrator | Any other directory | Only through ports | Fakes that implement its ports |
+| Orchestrator | `internal/orchestrators/...`; in a library, `orchestrators/...` | Only through ports | Fakes that implement its ports |
 | Driving adapter | `internal/adapters/driving/...`; in a library, `adapters/driving/...` | Yes: it serves the outside world, and calls orchestrators | Tests that drive it, with real orchestrators and fakes for their ports |
 | Driven adapter | `internal/adapters/driven/...`; in a library, `adapters/driven/...` | Yes: that's its job | Integration tests against the real dependency or a local stand-in |
 | Entrypoint | `cmd/<name>` | Yes: reads configuration, builds the adapters and orchestrators, starts a driving adapter | Kept small enough not to need tests |
 
-A package directly under `adapters/`, in neither `driving/` nor `driven/`, has no role, and `verify` reports it.
+A package in none of these directories has no role, and `verify` reports it: one directly under `adapters/`, in neither `driving/` nor `driven/`, or one elsewhere, such as `internal/app`. Put each package in the directory of the role it plays.
 
 Nothing records what a module is; its roles decide:
 
@@ -103,7 +103,7 @@ func For(name string, hour int) string {
 }
 ```
 
-An orchestrator declares the port it needs, gathers inputs through it and calls the core:
+An orchestrator, in `internal/orchestrators/app`, declares the port it needs, gathers inputs through it and calls the core:
 
 ```go
 // Package app greets people.

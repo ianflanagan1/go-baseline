@@ -323,14 +323,12 @@ func TestRolesFollowThePath(t *testing.T) {
 	}{
 		{"internal/core/greeting", baseline.Core},
 		{"core/parse", baseline.Core},
-		{"internal/app", baseline.Orchestrator},
-		{"", baseline.Orchestrator},
-		{"parse", baseline.Orchestrator},
+		{"internal/orchestrators/app", baseline.Orchestrator},
+		{"orchestrators/fetch", baseline.Orchestrator},
 		{"internal/adapters/driving/httpapi", baseline.DrivingAdapter},
 		{"internal/adapters/driven/clock", baseline.DrivenAdapter},
 		{"adapters/driven/clock", baseline.DrivenAdapter},
 		{"cmd/app", baseline.Entrypoint},
-		{"internal/corefake", baseline.Orchestrator},
 	} {
 		t.Run(tc.dir, func(t *testing.T) {
 			if got, ok := baseline.RoleOf(tc.dir); !ok || got != tc.want {
@@ -340,8 +338,10 @@ func TestRolesFollowThePath(t *testing.T) {
 	}
 }
 
-func TestAnAdapterInNeitherDrivingNorDrivenHasNoRole(t *testing.T) {
-	for _, dir := range []string{"internal/adapters", "internal/adapters/clock", "internal/adapters/clock/driven"} {
+func TestAPackageOutsideEveryRolesDirectoryHasNoRole(t *testing.T) {
+	for _, dir := range []string{
+		"", "parse", "internal/app", "internal/corefake", "internal/adapters", "internal/adapters/clock", "internal/adapters/clock/driven",
+	} {
 		t.Run(dir, func(t *testing.T) {
 			if got, ok := baseline.RoleOf(dir); ok {
 				t.Fatalf("got %v, want no role", got)
@@ -354,7 +354,7 @@ func TestAPackageWithNoRoleIsReported(t *testing.T) {
 	problems := baseline.RolelessProblems("example.com/app", []baseline.Package{
 		own("internal/adapters/clock"), own("internal/adapters/driven/store"),
 	})
-	assertOneProblem(t, problems, "example.com/app/internal/adapters/clock has no role; move it to adapters/driving/")
+	assertOneProblem(t, problems, "example.com/app/internal/adapters/clock has no role; move it under core/ if it decides")
 }
 
 func TestRolesHaveNames(t *testing.T) {
@@ -378,9 +378,9 @@ const goList = `{"ImportPath": "os", "Standard": true}
 {"ImportPath": "example.com/pure", "Imports": ["fmt"], "Module": {"Path": "example.com/pure"}}
 {"ImportPath": "example.com/sdk", "Imports": ["os"], "Module": {"Path": "example.com/sdk"}}
 {"ImportPath": "example.com/app/internal/core/rates", "Imports": ["example.com/mid", "example.com/pure", "fmt"], "Module": {"Path": "example.com/app"}}
-{"ImportPath": "example.com/app/internal/app", "Imports": ["example.com/app/internal/core/rates"], "Module": {"Path": "example.com/app"}}
+{"ImportPath": "example.com/app/internal/orchestrators/app", "Imports": ["example.com/app/internal/core/rates"], "Module": {"Path": "example.com/app"}}
 {"ImportPath": "example.com/app/internal/adapters/driven/store", "Imports": ["example.com/sdk", "os"], "Module": {"Path": "example.com/app"}}
-{"ImportPath": "example.com/app/cmd/app", "Imports": ["example.com/app/internal/app", "example.com/app/internal/adapters/driven/store"], "Module": {"Path": "example.com/app"}}
+{"ImportPath": "example.com/app/cmd/app", "Imports": ["example.com/app/internal/orchestrators/app", "example.com/app/internal/adapters/driven/store"], "Module": {"Path": "example.com/app"}}
 `
 
 func parsedGoList(t *testing.T) []baseline.Package {

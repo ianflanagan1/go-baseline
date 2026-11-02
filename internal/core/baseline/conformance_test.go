@@ -125,7 +125,7 @@ func TestConformance(t *testing.T) {
 	}
 	t.Run("code that keeps to its role is not reported", func(t *testing.T) {
 		for _, i := range issues {
-			if slices.Contains([]string{"internal/core/pure", "internal/app", "internal/adapters/driven/clock", "internal/adapters/driving/server"}, i.dir) &&
+			if slices.Contains([]string{"internal/core/pure", "internal/orchestrators/app", "internal/adapters/driven/clock", "internal/adapters/driving/server"}, i.dir) &&
 				slices.Contains([]string{"depguard", "forbidigo", "gochecknoglobals", "funlen", "gocognit"}, i.linter) {
 				t.Errorf("%s reported %s", i.linter, i.dir)
 			}

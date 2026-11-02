@@ -2,7 +2,7 @@
 package importsorchestrator
 
 import (
-	"example.com/conformance/internal/app"
+	"example.com/conformance/internal/orchestrators/app"
 )
 
 // F calls an orchestrator.

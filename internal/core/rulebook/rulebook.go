@@ -59,7 +59,7 @@ func goBaseline() listing {
 		Baseline: "github.com/ianflanagan1/go-baseline",
 		Roles: map[string]string{
 			"core":            "Packages under a core/ directory: internal/core/ in an application, core/ in a library.",
-			"orchestrator":    "Every other package, outside cmd/ and adapters/.",
+			"orchestrator":    "Packages under an orchestrators/ directory, such as internal/orchestrators/.",
 			"driving-adapter": "Packages under an adapters/driving/ directory.",
 			"driven-adapter":  "Packages under an adapters/driven/ directory.",
 			"entrypoint":      "Packages under cmd/.",
@@ -75,7 +75,7 @@ func checks() map[string]check {
 	language := func(summary string) check { return check{Kind: "language", Summary: summary} }
 	return map[string]check{
 		"role-of":                   custom("RoleOf gives each package one role from its directory alone, in every module."),
-		"verify-roles":              custom("verify reports a package under adapters/ that is in neither adapters/driving/ nor adapters/driven/, which has no role."),
+		"verify-roles":              custom("verify reports a package outside every role's directory, which has no role."),
 		"verify-release-unit":       custom("verify reports, in a module with an entrypoint, each other package outside internal/, and in a library with any role but adapters, each adapter that imports another module."),
 		"depguard-core":             lint("depguard's core rule: core packages import only the core, pure standard-library packages and third-party packages."),
 		"depguard-orchestrators":    lint("depguard's orchestrators rule: orchestrators import no adapter and no I/O package."),
@@ -120,7 +120,7 @@ func claims() map[string]claim {
 		"every-unit-has-one-role": {
 			Coverage: "full", Checks: []string{"role-of", "verify-roles"},
 			Proof: []string{
-				"internal/core/baseline: TestRolesFollowThePath", "internal/core/baseline: TestAnAdapterInNeitherDrivingNorDrivenHasNoRole",
+				"internal/core/baseline: TestRolesFollowThePath", "internal/core/baseline: TestAPackageOutsideEveryRolesDirectoryHasNoRole",
 				"internal/core/baseline: TestAPackageWithNoRoleIsReported",
 			},
 		},
