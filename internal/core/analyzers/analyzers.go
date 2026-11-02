@@ -1,6 +1,6 @@
-// Package analyzers holds the architecture checks go-baseline runs on a
-// project's code: rules that golangci-lint's linters can't express because
-// they need the project's roles and type information across packages.
+// Package analyzers holds the checks go-baseline runs on a project's code:
+// rules that golangci-lint's linters can't express because they need the
+// project's roles, or which of its types are its own.
 package analyzers
 
 import (
@@ -33,7 +33,7 @@ type Project struct {
 
 // All returns every analyzer for p.
 func All(p Project) []*analysis.Analyzer {
-	return []*analysis.Analyzer{CoreBoundary(p), ConfigRead(p), PortBranch(p)}
+	return []*analysis.Analyzer{CoreBoundary(p), ConfigRead(p), PortBranch(p), NoDefault(p), SumTypeDecl(p)}
 }
 
 // role returns the role of the package at importPath, and false when the

@@ -36,9 +36,19 @@ func TestAnAdaptersModuleMayReadConfiguration(t *testing.T) {
 }
 
 func TestAllReturnsEveryAnalyzer(t *testing.T) {
-	if got := len(analyzers.All(project(baseline.Command))); got != 3 {
-		t.Fatalf("got %d analyzers, want 3", got)
+	if got := len(analyzers.All(project(baseline.Command))); got != 5 {
+		t.Fatalf("got %d analyzers, want 5", got)
 	}
+}
+
+func TestNoDefault(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), analyzers.NoDefault(project(baseline.Command)),
+		"example.com/app/internal/core/families")
+}
+
+func TestSumTypeDecl(t *testing.T) {
+	analysistest.Run(t, analysistest.TestData(), analyzers.SumTypeDecl(project(baseline.Command)),
+		"example.com/app/internal/core/sealed")
 }
 
 func TestPortBranch(t *testing.T) {
@@ -56,7 +66,7 @@ func (ignoreExpectations) Errorf(string, ...any) {}
 func TestTheGuidesExamplesPassEveryAnalyzer(t *testing.T) {
 	for _, a := range analyzers.All(project(baseline.Command)) {
 		t.Run(a.Name, func(t *testing.T) {
-			results := analysistest.Run(ignoreExpectations{}, analysistest.TestData(), a, "example.com/app/internal/guide")
+			results := analysistest.Run(ignoreExpectations{}, analysistest.TestData(), a, "example.com/app/internal/guide", "example.com/app/internal/core/lookup")
 			if len(results) == 0 {
 				t.Fatal("the guide's examples didn't load")
 			}

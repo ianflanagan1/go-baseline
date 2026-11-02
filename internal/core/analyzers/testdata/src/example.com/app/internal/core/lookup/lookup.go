@@ -26,6 +26,8 @@ type Response struct {
 }
 
 // Step is one of Retry, Done and Fail.
+//
+//sumtype:decl
 type Step interface{ isStep() }
 
 type Retry struct {
