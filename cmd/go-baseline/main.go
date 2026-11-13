@@ -1,5 +1,6 @@
 // Command go-baseline keeps a Go project on the settings every project
-// shares. `write` generates .golangci.yml from go.mod, and BASELINE.md;
+// shares. `write` generates .golangci.yml from go.mod, and BASELINE.md, and
+// pins GOTOOLCHAIN in devbox.json;
 // `verify` fails when the project has drifted from the baseline, breaks an
 // architecture rule, has an untidy go.mod or calls a known vulnerability;
 // `test` runs the tests and fails when a core package's
@@ -65,7 +66,8 @@ func run(args []string) error {
 	return errors.New(usage)
 }
 
-// write generates .golangci.yml, BASELINE.md, the CI workflow and the Taskfile.
+// write generates .golangci.yml, BASELINE.md, the CI workflow and the
+// Taskfile, and pins GOTOOLCHAIN in devbox.json to the baseline's toolchain.
 func write() error {
 	module, err := readModule()
 	if err != nil {
@@ -89,6 +91,22 @@ func write() error {
 	}
 	if err := os.WriteFile(baseline.TaskfilePath, baseline.Taskfile(), 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", baseline.TaskfilePath, err)
+	}
+	return pinToolchain()
+}
+
+// pinToolchain sets GOTOOLCHAIN in devbox.json to the baseline's toolchain.
+func pinToolchain() error {
+	devbox, err := os.ReadFile("devbox.json")
+	if err != nil {
+		return fmt.Errorf("reading devbox.json: %w", err)
+	}
+	pinned, err := baseline.PinToolchain(devbox)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile("devbox.json", pinned, 0o600); err != nil {
+		return fmt.Errorf("writing devbox.json: %w", err)
 	}
 	return nil
 }

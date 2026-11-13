@@ -22,6 +22,12 @@ import (
 // the version the generated config is written for.
 const GolangciLintVersion = "2.15.0"
 
+// ToolchainVersion is the Go release the baseline approves. Every project
+// sets GOTOOLCHAIN to it in devbox.json, so Go downloads exactly this
+// release and checks it against the checksum database; the Go that devbox
+// pins only starts the go command, and must be the same minor version.
+const ToolchainVersion = "1.27.4"
+
 // TaskVersion is the go-task every project pins in devbox.json, the version
 // the generated Taskfile is written for.
 const TaskVersion = "3.53.1"
@@ -426,10 +432,8 @@ func devboxProblems(devbox, goMod []byte) []string {
 	}
 
 	problems := devboxPackageProblems(config.Packages)
+	problems = append(problems, toolchainProblems(config.Env)...)
 	problems = append(problems, goVersionProblems(config.Packages, goMod)...)
-	if config.Env["GOTOOLCHAIN"] != "local" {
-		problems = append(problems, `devbox.json must set env GOTOOLCHAIN to "local"`)
-	}
 	for _, name := range slices.Sorted(maps.Keys(config.Shell.Scripts)) {
 		problems = append(problems, fmt.Sprintf("devbox.json script %q: move it into a task in Taskfile.project.yml; devbox only pins tools", name))
 	}
@@ -468,34 +472,67 @@ func gitignoreProblems(gitignore []byte) []string {
 	return []string{".gitignore must have the line " + CacheIgnore + ", for the directory tools keep their caches in"}
 }
 
-// goVersionProblems reports go.mod's go line differing from the minor
-// version of the Go that devbox pins. A missing pin is reported by
-// devboxPackageProblems.
-func goVersionProblems(packages []string, goMod []byte) []string {
-	var minor string
-	for _, pkg := range packages {
-		if match := exactGo.FindStringSubmatch(pkg); match != nil {
-			minor = match[1]
-		}
-	}
-	if minor == "" {
-		return nil
-	}
-	goLine, found := goDirective(goMod)
-	if !found {
-		return []string{"go.mod has no go line; run `devbox run -- go mod edit -go=" + minor + "`"}
-	}
-	if goLine != minor && !strings.HasPrefix(goLine, minor+".") {
-		return []string{fmt.Sprintf("go.mod's go line is %s, but devbox.json pins Go %s; run `devbox run -- go mod edit -go=%s`", goLine, minor, minor)}
-	}
-	return nil
+// toolchainEnv is what devbox.json's env must set GOTOOLCHAIN to.
+const toolchainEnv = "go" + ToolchainVersion
+
+// checksumEnv are the variables that can switch off the checksum check of
+// the toolchain Go downloads.
+func checksumEnv() []string {
+	return []string{"GOSUMDB", "GONOSUMDB", "GONOSUMCHECK", "GOPRIVATE", "GOINSECURE", "GOFLAGS"}
 }
 
-// goDirective returns the version on go.mod's go line, and whether it has one.
-func goDirective(goMod []byte) (string, bool) {
+// toolchainProblems reports devbox.json's env not pinning GOTOOLCHAIN to the
+// baseline's toolchain, or setting a variable that could switch off the
+// check of its checksum.
+func toolchainProblems(env map[string]string) []string {
+	var problems []string
+	if env["GOTOOLCHAIN"] != toolchainEnv {
+		problems = append(problems, fmt.Sprintf("devbox.json must set env GOTOOLCHAIN to %q, the Go release the baseline approves; run `go tool go-baseline write`", toolchainEnv))
+	}
+	for _, name := range checksumEnv() {
+		if _, set := env[name]; set {
+			problems = append(problems, fmt.Sprintf("devbox.json must not set env %s, which can switch off the checksum check of the Go toolchain GOTOOLCHAIN downloads; remove it", name))
+		}
+	}
+	return problems
+}
+
+// toolchainMinor is the minor version of ToolchainVersion.
+func toolchainMinor() string {
+	return ToolchainVersion[:strings.LastIndex(ToolchainVersion, ".")]
+}
+
+// goVersionProblems reports the Go that devbox pins, or go.mod's go line,
+// differing from the minor version of the baseline's toolchain, and go.mod
+// having a toolchain line. A missing exact pin is reported by
+// devboxPackageProblems.
+func goVersionProblems(packages []string, goMod []byte) []string {
+	minor := toolchainMinor()
+	var problems []string
+	for _, pkg := range packages {
+		if match := exactGo.FindStringSubmatch(pkg); match != nil && match[1] != minor {
+			problems = append(problems, fmt.Sprintf("devbox.json pins %s, but the baseline's Go toolchain is %s; pin an exact Go %s release, such as go@%s.0", pkg, toolchainEnv, minor, minor))
+		}
+	}
+	goLine, found := goModDirective(goMod, "go")
+	switch {
+	case !found:
+		problems = append(problems, "go.mod has no go line; run `devbox run -- go mod edit -go="+minor+"`")
+	case goLine != minor && !strings.HasPrefix(goLine, minor+"."):
+		problems = append(problems, fmt.Sprintf("go.mod's go line is %s, but the baseline's Go toolchain is %s; run `devbox run -- go mod edit -go=%s`", goLine, toolchainEnv, minor))
+	}
+	if toolchain, found := goModDirective(goMod, "toolchain"); found {
+		problems = append(problems, fmt.Sprintf("go.mod has the line toolchain %s, but GOTOOLCHAIN in devbox.json pins the toolchain; run `devbox run -- go mod edit -toolchain=none`", toolchain))
+	}
+	return problems
+}
+
+// goModDirective returns the argument of go.mod's line for the one-argument
+// directive name, such as go or toolchain, and whether it has one.
+func goModDirective(goMod []byte, name string) (string, bool) {
 	for line := range strings.Lines(string(goMod)) {
 		fields := strings.Fields(strings.SplitN(line, "//", 2)[0])
-		if len(fields) == 2 && fields[0] == "go" {
+		if len(fields) == 2 && fields[0] == name {
 			return fields[1], true
 		}
 	}

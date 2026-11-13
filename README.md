@@ -32,10 +32,11 @@ Publish it with `github publish` from repo-tools.
 | CI: `devbox run -- task check` on each push and pull request | `.github/workflows/check.yml` | `verify`: must match byte for byte |
 | `check`, `lint`, `lint-file`, `test` and `integration` tasks, including the project's own from `Taskfile.project.yml` | `Taskfile.yml` | `verify`: must match byte for byte |
 | The architecture and conventions, with examples, for people and AI agents | `BASELINE.md`, imported by the project's `CLAUDE.md` | `verify`: must match byte for byte |
-| Go pinned to an exact version, golangci-lint and go-task to the baseline's versions | `devbox.json` packages | `verify` |
-| `go.mod`'s `go` line is the minor version of the Go that devbox pins | `go.mod` | `verify` |
-| `GOTOOLCHAIN=local` | `devbox.json` env | `verify` |
+| Go pinned to an exact version of the toolchain's minor version, golangci-lint and go-task to the baseline's versions | `devbox.json` packages | `verify` |
 | [coupled-tags-lint](https://github.com/ianflanagan1/coupled-tags), which `check` runs to lint the `COUPLED:` tags | `devbox.json` packages, with the commit pinned in `devbox.lock` | `verify` |
+| `go.mod`'s `go` line is the toolchain's minor version, and `go.mod` has no `toolchain` line | `go.mod` | `verify` |
+| `GOTOOLCHAIN=go<ToolchainVersion>`, the Go release the baseline approves, which Go downloads and checks against the checksum database. Devbox's Go only starts the `go` command and fixes the minor version golangci-lint is built for. `write` sets it | `devbox.json` env | `verify` |
+| No `GOSUMDB`, `GONOSUMDB`, `GONOSUMCHECK`, `GOPRIVATE`, `GOINSECURE` or `GOFLAGS`, which can switch off that check | `devbox.json` env | `verify` |
 | No scripts: every command is a task | `devbox.json` | `verify` |
 | `cache/`, where tools keep their caches, is ignored with the line `/cache/` | `.gitignore` | `verify` |
 | Values reaching the core through interfaces, functions, fields or type arguments are pure (`coreboundary`) | code | `verify` |
@@ -136,7 +137,7 @@ When a check changes what it enforces, or the baseline moves to a new rulebook r
 
 ## Changing a shared setting
 
-1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, the tasks in `internal/core/baseline/Taskfile.yml`, or the constants in `baseline.go`. To let the core and orchestrators use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint or go-task, change `GolangciLintVersion` or `TaskVersion` and the version in this repo's `devbox.json` together; this repo's own `verify` fails until they agree. Pin a GitHub Action in `check.yml` by its commit SHA, with the tag in a comment.
+1. Change it here: the template in `internal/core/baseline/golangci.yml.tmpl`, the guide in `internal/core/baseline/BASELINE.md`, the tasks in `internal/core/baseline/Taskfile.yml`, or the constants in `baseline.go`. To let the core and orchestrators use a third-party package the dependency check rejects, add it to `dependencyAllowlist` with the reason, after reading the code projects call. When bumping golangci-lint or go-task, change `GolangciLintVersion` or `TaskVersion` and the version in this repo's `devbox.json` together; this repo's own `verify` fails until they agree. When Go ships a release, raise `ToolchainVersion`, then run `devbox run -- go run ./cmd/go-baseline write` here to set this repo's `GOTOOLCHAIN`; a new minor version also moves devbox's `go@` pin and `go.mod`'s `go` line to it. Pin a GitHub Action in `check.yml` by its commit SHA, with the tag in a comment.
 2. `devbox run -- task check`, commit, then `github release . minor`.
 3. In go-template and each project:
 

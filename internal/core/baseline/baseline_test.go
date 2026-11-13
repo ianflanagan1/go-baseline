@@ -15,7 +15,7 @@ const goMod = "module example.com/app\n\ngo 1.27\n"
 
 const devbox = `{
   "packages": ["go@1.27.3", "golangci-lint@` + baseline.GolangciLintVersion + `", "go-task@` + baseline.TaskVersion + `", "` + baseline.CoupledTagsLintPackage + `"],
-  "env": {"GOTOOLCHAIN": "local"}
+  "env": {"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `"}
 }`
 
 func matchingProject(t *testing.T) baseline.Project {
@@ -235,7 +235,13 @@ func TestDevboxDriftIsReported(t *testing.T) {
 		{"go not pinned", `"go@1.27.3"`, `"go@latest"`, "pin Go"},
 		{"go pinned to a minor version", `"go@1.27.3"`, `"go@1.27"`, "pin Go"},
 		{"another golangci-lint", "golangci-lint@" + baseline.GolangciLintVersion, "golangci-lint@2.0.0", "golangci-lint@"},
-		{"toolchain downloads allowed", `"GOTOOLCHAIN": "local"`, `"GOTOOLCHAIN": "auto"`, "GOTOOLCHAIN"},
+		{"go pinned to another minor version than the toolchain", `"go@1.27.3"`, `"go@1.26.5"`, "Go 1.27"},
+		{"no GOTOOLCHAIN", `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `"`, `"OTHER": "x"`, "go tool go-baseline write"},
+		{"the toolchain devbox installs", `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `"`, `"GOTOOLCHAIN": "local"`, "go tool go-baseline write"},
+		{"any toolchain go.mod asks for", `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `"`, `"GOTOOLCHAIN": "auto"`, "go tool go-baseline write"},
+		{"a newer toolchain if go.mod asks", `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `"`, `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `+auto"`, "go tool go-baseline write"},
+		{"the toolchain on the PATH if go.mod asks", `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `"`, `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `+path"`, "go tool go-baseline write"},
+		{"another toolchain", `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `"`, `"GOTOOLCHAIN": "go1.27.0"`, "go tool go-baseline write"},
 		{"another go-task", "go-task@" + baseline.TaskVersion, "go-task@3.0.0", "go-task@"},
 		{"no coupled-tags-lint", `, "` + baseline.CoupledTagsLintPackage + `"`, "", baseline.CoupledTagsLintPackage},
 		{"a devbox script", `"env"`, `"shell": {"scripts": {"build": "go build ./..."}}, "env"`, `script "build": move it`},
@@ -244,6 +250,30 @@ func TestDevboxDriftIsReported(t *testing.T) {
 			p := matchingProject(t)
 			p.Devbox = []byte(strings.Replace(devbox, tc.from, tc.to, 1))
 			assertOneProblem(t, verify(t, p), tc.want)
+		})
+	}
+}
+
+func TestDevboxEnvThatCanSwitchOffTheToolchainsChecksumIsReported(t *testing.T) {
+	for _, name := range []string{"GOSUMDB", "GONOSUMDB", "GONOSUMCHECK", "GOPRIVATE", "GOINSECURE", "GOFLAGS"} {
+		t.Run(name, func(t *testing.T) {
+			p := matchingProject(t)
+			p.Devbox = []byte(strings.Replace(devbox, `"env": {`, `"env": {"`+name+`": "off", `, 1))
+			assertOneProblem(t, verify(t, p), "must not set env "+name)
+		})
+	}
+}
+
+func TestGoModMustHaveNoToolchainLine(t *testing.T) {
+	for _, tc := range []struct{ name, toolchain string }{
+		{"the baseline's toolchain", "toolchain go" + baseline.ToolchainVersion},
+		{"another toolchain", "toolchain go1.27.0"},
+		{"with a comment", "toolchain go1.27.0 // pinned"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := matchingProject(t)
+			p.GoMod = []byte(goMod + "\n" + tc.toolchain + "\n")
+			assertOneProblem(t, verify(t, p), "go mod edit -toolchain=none")
 		})
 	}
 }
@@ -558,5 +588,82 @@ func TestEachUnreachableFunctionIsAProblem(t *testing.T) {
 func TestNoUnreachableFunctionsIsNoProblems(t *testing.T) {
 	if problems := baseline.DeadcodeProblems(nil); problems != nil {
 		t.Fatalf("got %q", problems)
+	}
+}
+
+const pinned = `"GOTOOLCHAIN": "go` + baseline.ToolchainVersion + `"`
+
+func TestPinningTheToolchainReplacesGOTOOLCHAINAndKeepsTheRest(t *testing.T) {
+	in := "{\n  \"packages\": [\"go@1.27.3\"],\n  \"env\": {\n    \"A\": \"1\",\n    \"GOTOOLCHAIN\": \"local\",\n    \"B\": \"2\"\n  }\n}\n"
+	want := "{\n  \"packages\": [\"go@1.27.3\"],\n  \"env\": {\n    \"A\": \"1\",\n    " + pinned + ",\n    \"B\": \"2\"\n  }\n}\n"
+	assertPinned(t, in, want)
+}
+
+func TestPinningTheToolchainLeavesAGOTOOLCHAINOutsideEnvAlone(t *testing.T) {
+	in := "{\n  \"GOTOOLCHAIN\": \"x\",\n  \"shell\": {\"GOTOOLCHAIN\": \"y\"},\n  \"env\": {\"GOTOOLCHAIN\": \"local\"}\n}"
+	want := "{\n  \"GOTOOLCHAIN\": \"x\",\n  \"shell\": {\"GOTOOLCHAIN\": \"y\"},\n  \"env\": {" + pinned + "}\n}"
+	assertPinned(t, in, want)
+}
+
+func TestPinningTheToolchainAddsGOTOOLCHAINToEnv(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			"env with other variables",
+			"{\n  \"env\": {\n    \"A\": \"1\"\n  }\n}\n",
+			"{\n  \"env\": {\n    \"A\": \"1\",\n    " + pinned + "\n  }\n}\n",
+		},
+		{
+			"an empty env",
+			"{\n  \"env\": {}\n}\n",
+			"{\n  \"env\": {\n    " + pinned + "\n  }\n}\n",
+		},
+		{
+			"no env",
+			"{\n  \"packages\": [\"go@1.27.3\"]\n}\n",
+			"{\n  \"packages\": [\"go@1.27.3\"],\n  \"env\": {\n    " + pinned + "\n  }\n}\n",
+		},
+		{
+			"an empty file",
+			"{}",
+			"{\n  \"env\": {\n    " + pinned + "\n  }\n}",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPinned(t, tc.in, tc.want)
+		})
+	}
+}
+
+func TestAPinnedDevboxPassesVerify(t *testing.T) {
+	p := matchingProject(t)
+	unpinned := strings.Replace(devbox, pinned, `"GOTOOLCHAIN": "local"`, 1)
+	out, err := baseline.PinToolchain([]byte(unpinned))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Devbox = out
+	if problems := verify(t, p); problems != nil {
+		t.Fatalf("got %q", problems)
+	}
+}
+
+func TestPinningTheToolchainInDevboxThatIsntAJSONObjectIsAnError(t *testing.T) {
+	for _, in := range []string{"", "[]", "{", `{"env": "x"}`, `{"env": {"GOTOOLCHAIN": 1}}`, "{} {}"} {
+		t.Run(in, func(t *testing.T) {
+			if _, err := baseline.PinToolchain([]byte(in)); err == nil {
+				t.Fatal("got no error")
+			}
+		})
+	}
+}
+
+func assertPinned(t *testing.T, in, want string) {
+	t.Helper()
+	got, err := baseline.PinToolchain([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
 }

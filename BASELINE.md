@@ -13,6 +13,7 @@ The rules this project shares with every Go project built on go-baseline. The li
 - Run `devbox run -- go mod tidy` after changing dependencies. `verify` fails when `go.mod` is untidy, or when the code calls a function with a known vulnerability; upgrade the dependency to fix one.
 - In a module with a program in `cmd/`, `verify` reports each function under `cmd/` or `internal/` that no program calls, even indirectly. A function only tests call is unreachable too. Delete code nothing runs.
 - Run tools through devbox (`devbox run -- go ...`), so the pinned Go and golangci-lint are used.
+- `GOTOOLCHAIN` in `devbox.json` pins the exact Go release, which Go downloads and checks against the checksum database. Never edit it or set `GOTOOLCHAIN` for one command: `go tool go-baseline write` sets it to the release the baseline approves, so a newer Go comes from upgrading go-baseline.
 - Run `go tool go-baseline map` to see each package's role, the ports the orchestrators declare and the driven adapters that implement them.
 - Tools keep their caches in `cache/`, which `.gitignore` ignores with the line `/cache/`; `verify` fails without it. Point a tool that caches inside the project at a directory under it, such as `cache/<tool>/`.
 
