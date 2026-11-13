@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -74,31 +75,44 @@ func lintConformanceFixture(t *testing.T) []issue {
 // subtest is named for its clause.
 func TestConformance(t *testing.T) {
 	issues := lintConformanceFixture(t)
-	clauses := map[string][]issue{
-		"core-imports-only-core": {
-			{"depguard", "internal/core/importsorchestrator"},
-			{"depguard", "internal/core/importsadapter"},
-			{"depguard", "internal/core/importsdriving"},
+	for clause, want := range conformanceClauses() {
+		t.Run(clause, func(t *testing.T) {
+			for _, w := range want {
+				if !slices.Contains(issues, w) {
+					t.Errorf("%s didn't report %s", w.linter, w.dir)
+				}
+			}
+		})
+	}
+	t.Run("code that keeps to its role is not reported", func(t *testing.T) {
+		compliant := []string{
+			"internal/core/pure", "internal/orchestrators/app", "internal/adapters/driven/notes",
+			"internal/adapters/driving/server", "internal/adapters/driving/timed",
+		}
+		claimed := []string{"depguard", "forbidigo", "gochecknoglobals", "funlen", "gocognit", "gosec", "modernize", "revive"}
+		for _, i := range issues {
+			if slices.Contains(compliant, i.dir) && slices.Contains(claimed, i.linter) {
+				t.Errorf("%s reported %s", i.linter, i.dir)
+			}
+		}
+	})
+}
+
+// conformanceClauses returns, for each clause, the issues its violations'
+// fixtures should get.
+func conformanceClauses() map[string][]issue {
+	clauses := architectureClauses()
+	maps.Copy(clauses, map[string][]issue{
+		// Design
+		"nothing-is-imported-by-a-computed-path": {
+			{"depguard", "internal/core/loadsplugin"}, {"depguard", "internal/orchestrators/loadsplugin"},
 		},
-		"core-performs-no-effects": effects("internal/core/", "depguard"),
-		"orchestrator-imports-no-adapter": {
-			{"depguard", "internal/orchestrators/importsadapter"}, {"depguard", "internal/orchestrators/importsdriving"},
-		},
-		"orchestrator-performs-no-effects": effects("internal/orchestrators/", "forbidigo"),
-		"ports-declared-by-their-user":     {{"depguard", "internal/orchestrators/importsadapter"}},
-		"port-units-follow-typing":         {{"depguard", "internal/adapters/driven/importsorchestrator"}},
-		"driving-adapter-imports-only-core-orchestrators-and-driving-adapters": {
-			{"depguard", "internal/adapters/driving/importsdriven"},
-		},
-		"driven-adapter-imports-only-core-ports-and-driven-adapters": {
-			{"depguard", "internal/adapters/driven/importsorchestrator"}, {"depguard", "internal/adapters/driven/importsdriving"},
-		},
-		"driving-adapter-calls-no-driven-adapter": {{"depguard", "internal/adapters/driving/importsdriven"}},
-		"driven-adapter-calls-no-orchestrator":    {{"depguard", "internal/adapters/driven/importsorchestrator"}},
-		"adapter-size-is-limited":                 {{"funlen", "internal/adapters/driven/long"}},
-		"entrypoint-size-is-limited":              {{"funlen", "cmd/app"}},
-		"wired-without-a-container":               {{"depguard", "internal/orchestrators/container"}, {"depguard", "cmd/container"}},
-		"closed-families-are-sealed":              {{"gochecksumtype", "internal/core/unsealed"}},
+		"visibility-is-not-bypassed":                {{"gosec", "internal/core/unsafefield"}},
+		"no-cast-asserts-an-unchecked-type":         {{"gosec", "internal/core/unsafecast"}},
+		"loops-compute-no-value-an-operation-names": {{"modernize", "internal/core/loopcontains"}},
+		"no-positional-groups":                      {{"revive", "internal/core/errorfirst"}},
+		"shared-collections-are-not-changed":        {{"revive", "internal/core/appendsparameter"}},
+		"closed-families-are-sealed":                {{"gochecksumtype", "internal/core/unsealed"}},
 		"matches-on-closed-families-are-exhaustive": {
 			{"gochecksumtype", "internal/core/missingvariant"}, {"exhaustive", "internal/core/missingvalue"},
 		},
@@ -110,27 +124,69 @@ func TestConformance(t *testing.T) {
 			{"revive", "internal/core/defaultedparameter"},
 			{"revive", "internal/core/closureparameter"},
 		},
+
+		// Errors
+		"error-types-of-other-roles-are-not-matched": {
+			{"depguard", "internal/adapters/driving/matchesdriven"}, {"depguard", "internal/orchestrators/matchesdriven"},
+		},
 		"returned-failures-are-used": {
 			{"errcheck", "internal/core/droppederror"}, {"ineffassign", "internal/core/unreadsentinel"},
 		},
-	}
-	for clause, want := range clauses {
-		t.Run(clause, func(t *testing.T) {
-			for _, w := range want {
-				if !slices.Contains(issues, w) {
-					t.Errorf("%s didn't report %s", w.linter, w.dir)
-				}
-			}
-		})
-	}
-	t.Run("code that keeps to its role is not reported", func(t *testing.T) {
-		for _, i := range issues {
-			if slices.Contains([]string{"internal/core/pure", "internal/orchestrators/app", "internal/adapters/driven/clock", "internal/adapters/driving/server"}, i.dir) &&
-				slices.Contains([]string{"depguard", "forbidigo", "gochecknoglobals", "funlen", "gocognit"}, i.linter) {
-				t.Errorf("%s reported %s", i.linter, i.dir)
-			}
-		}
+		"failure-branches-act": {{"revive", "internal/core/emptybranch"}},
+
+		// Testing
+		"fake-code-performs-only-held-state": {{"gochecknoglobals", "internal/orchestrators/fakeglobal"}},
 	})
+	return clauses
+}
+
+func architectureClauses() map[string][]issue {
+	return map[string][]issue{
+		"core-references-only-core": {
+			{"depguard", "internal/core/importsorchestrator"},
+			{"depguard", "internal/core/importsadapter"},
+			{"depguard", "internal/core/importsdriving"},
+		},
+		"core-does-nothing-impure": append(effects("internal/core/", "depguard"), issue{"forbidigo", "internal/core/enumclock"}),
+		"orchestrator-code-references-no-entrypoint-or-adapter-code": {
+			{"depguard", "internal/orchestrators/importsadapter"}, {"depguard", "internal/orchestrators/importsdriving"},
+		},
+		"orchestrator-code-performs-no-effects": effects("internal/orchestrators/", "forbidigo"),
+		"core-loading-does-nothing-impure":      {{"gochecknoinits", "internal/core/loadtime"}},
+		"port-is-declared-by-its-caller":        {{"depguard", "internal/orchestrators/importsadapter"}},
+		"port-units-of-code-follow-interface-implementation": {
+			{"depguard", "internal/adapters/driven/importsorchestrator"},
+		},
+		"orchestrator-is-given-ports": {
+			{"depguard", "internal/orchestrators/importsadapter"}, {"depguard", "internal/orchestrators/container"},
+		},
+		"driving-adapter-code-references-only-orchestrators-and-the-core": {
+			{"depguard", "internal/adapters/driving/importsdriven"},
+		},
+		"driven-adapter-code-references-only-ports-and-values": {
+			{"depguard", "internal/adapters/driven/importsorchestrator"},
+			{"depguard", "internal/adapters/driven/internal/rows"},
+			{"depguard", "internal/adapters/driven/importsdriving"},
+			{"depguard", "internal/adapters/driven/importsentrypoint"},
+		},
+		"driving-adapter-code-calls-no-driven-adapter": {{"depguard", "internal/adapters/driving/importsdriven"}},
+		"driven-adapter-code-calls-no-orchestrator":    {{"depguard", "internal/adapters/driven/importsorchestrator"}},
+		"adapter-code-function-size-is-limited":        {{"funlen", "internal/adapters/driven/long"}},
+		"entrypoint-code-function-size-is-limited":     {{"funlen", "cmd/app"}},
+		"entrypoint-code-wires-without-a-container":    {{"depguard", "internal/orchestrators/container"}, {"depguard", "cmd/container"}},
+		"value-code-references-only-value-code":        {{"depguard", "internal/core/errorreferencesorchestrator"}},
+		"adapters-and-entrypoints-perform-only-their-roles-operations": {
+			{"gochecknoglobals", "internal/adapters/driven/globalstate"},
+		},
+		"nothing-sleeps": {{"forbidigo", "internal/core/sleep"}, {"forbidigo", "internal/orchestrators/sleep"}},
+		"reserved-operations-are-performed-only-by-their-system-adapters": {
+			{"forbidigo", "internal/core/clock"},
+			{"depguard", "internal/core/randomness"},
+			{"forbidigo", "internal/orchestrators/clock"},
+			{"depguard", "internal/orchestrators/randomness"},
+			{"gosec", "internal/adapters/driven/pseudorandom"},
+		},
+	}
 }
 
 // effects returns the issue each effect's fixture under prefix should get.
@@ -150,14 +206,58 @@ func effects(prefix, logging string) []issue {
 	}
 }
 
-// TestTheCompilerRejectsImportCycles shows the language enforcing
-// no-import-cycles, over testdata/cycle, whose two packages import each other.
-func TestTheCompilerRejectsImportCycles(t *testing.T) {
+// buildFails runs `go build ./...` over the fixture module in dir, and
+// returns what the compiler said when the build failed.
+func buildFails(t *testing.T, dir string) string {
+	t.Helper()
 	cmd := exec.Command("go", "build", "./...")
-	cmd.Dir = "testdata/cycle"
+	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "import cycle not allowed") {
-		t.Errorf("got %v:\n%s\nwant an import cycle error", err, out)
+	if err == nil {
+		t.Fatalf("%s built:\n%s", dir, out)
+	}
+	return string(out)
+}
+
+// TestTheCompilerRejectsImportCycles shows the language enforcing
+// no-reference-cycles. In testdata/cycle two packages import each other. In
+// testdata/variantcycle a sealed union's variant references a package that
+// references the union: Go keeps a union and its variants in one package,
+// so that is a cycle between packages too.
+func TestTheCompilerRejectsImportCycles(t *testing.T) {
+	for name, dir := range map[string]string{
+		"two packages that import each other":                              "testdata/cycle",
+		"a sealed union's variant and a package that references the union": "testdata/variantcycle",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if out := buildFails(t, dir); !strings.Contains(out, "import cycle not allowed") {
+				t.Errorf("got:\n%s\nwant an import cycle error", out)
+			}
+		})
+	}
+}
+
+// TestTheCompilerKeepsARolesHelpersFromOtherRoles shows the language
+// enforcing other-roles-reach-only-members, over testdata/helpers, whose
+// driving adapter imports a helper under internal/orchestrators/internal/.
+func TestTheCompilerKeepsARolesHelpersFromOtherRoles(t *testing.T) {
+	out := buildFails(t, "testdata/helpers")
+	if !strings.Contains(out, "use of internal package example.com/helpers/internal/orchestrators/internal/paging not allowed") {
+		t.Errorf("got:\n%s\nwant an internal package error", out)
+	}
+}
+
+// TestTheCompilerLetsNoPackageImportAnEntrypoint shows the language keeping
+// every other role's code from referencing an entrypoint, over
+// testdata/importsentrypoint, whose orchestrator and adapters each import
+// its main package.
+func TestTheCompilerLetsNoPackageImportAnEntrypoint(t *testing.T) {
+	out := buildFails(t, "testdata/importsentrypoint")
+	for _, dir := range []string{"internal/orchestrators/wired", "internal/adapters/driving/wired", "internal/adapters/driven/wired"} {
+		want := filepath.FromSlash(dir) + string(filepath.Separator) + `wired.go:4:8: import "example.com/importsentrypoint/cmd/app" is a program, not an importable package`
+		if !strings.Contains(out, want) {
+			t.Errorf("got:\n%s\nwant %s", out, want)
+		}
 	}
 }
 
@@ -200,10 +300,9 @@ func TestTheLintTaskFailsOnUnformattedFiles(t *testing.T) {
 // use for them. Each subtest is named for its clause.
 func TestGoHasNoSyntaxFor(t *testing.T) {
 	for clause, src := range map[string]string{
-		"classes-extend-only-allowed-bases": "type Base struct{}\n\ntype Derived extends Base\n",
-		"no-parameter-default-values":       "func f(n int = 1) int { return n }\n",
-		"no-optional-parameters":            "func f(n? int) int { return n }\n",
-		"field-initialisers-are-constants":  "type T struct {\n\tn int = 1\n}\n",
+		"no-parameter-default-values":      "func f(n int = 1) int { return n }\n",
+		"no-optional-parameters":           "func f(n? int) int { return n }\n",
+		"field-initialisers-are-constants": "type T struct {\n\tn int = 1\n}\n",
 	} {
 		t.Run(clause, func(t *testing.T) {
 			if _, err := parser.ParseFile(token.NewFileSet(), "f.go", "package p\n\n"+src, 0); err == nil {
@@ -213,8 +312,99 @@ func TestGoHasNoSyntaxFor(t *testing.T) {
 	}
 }
 
+// TestTheCompilerRejects shows the language enforcing the clauses that Go's
+// type checker leaves no way to break: the parser or the type checker
+// rejects each declaration. Each subtest is named for its clause.
+func TestTheCompilerRejects(t *testing.T) {
+	for clause, sources := range map[string]map[string]string{
+		"parameters-are-typed": {
+			"a parameter with no type": "func f(n) int { return 1 }\n",
+		},
+		"return-types-are-declared-where-called-from-outside": {
+			"a function that returns a value and declares no result": "func F() { return 1 }\n",
+		},
+		"fields-are-typed": {
+			"a field with no type": "type T struct{ n }\n",
+		},
+		"collection-types-name-their-element-type": {
+			"a slice with no element type": "func F(items []) int { return len(items) }\n",
+			"a map with no value type":     "func F(byID map[string]) int { return len(byID) }\n",
+			"a map with no key type":       "func F(byID map[]int) int { return len(byID) }\n",
+		},
+		"no-type-turns-checking-off": {
+			"arithmetic on an any":        "func F(v any) int { return v + 1 }\n",
+			"a field read from an any":    "func F(v any) string { return v.name }\n",
+			"an any passed as a string":   "func F(v any) int { return len(g(v)) }\n\nfunc g(s string) string { return s }\n",
+			"an any assigned to an int":   "func F(v any) int {\n\tvar n int = v\n\treturn n\n}\n",
+			"a method called on an any":   "func F(v any) string { return v.Name() }\n",
+			"an any called as a function": "func F(v any) { v() }\n",
+		},
+		"type-checker-runs-at-its-strictest": {
+			"a value of the wrong type": "var n int = \"one\"\n",
+		},
+	} {
+		t.Run(clause, func(t *testing.T) {
+			for name, src := range sources {
+				if compiles("package p\n\n" + src) {
+					t.Errorf("%s: the compiler accepted:\n%s", name, src)
+				}
+			}
+		})
+	}
+}
+
+// compiles reports whether the parser and the type checker both accept src,
+// a file that imports nothing.
+func compiles(src string) bool {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "f.go", src, 0)
+	if err != nil {
+		return false
+	}
+	_, err = (&types.Config{}).Check("example.com/p", fset, []*ast.File{file}, nil)
+	return err == nil
+}
+
+// TestTheCompilerAcceptsWhatTheCompilerTestsBuildOn guards
+// TestTheCompilerRejects against a source it rejects for another reason.
+func TestTheCompilerAcceptsWhatTheCompilerTestsBuildOn(t *testing.T) {
+	for name, src := range map[string]string{
+		"a typed parameter":            "func f(n int) int { return n }\n",
+		"a declared result":            "func F() int { return 1 }\n",
+		"a typed field":                "type T struct{ n int }\n",
+		"a slice of ints":              "func F(items []int) int { return len(items) }\n",
+		"an any narrowed with a test":  "func F(v any) int {\n\tn, ok := v.(int)\n\tif !ok {\n\t\treturn 0\n\t}\n\treturn n + 1\n}\n",
+		"a value of the declared type": "var n int = 1\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !compiles("package p\n\n" + src) {
+				t.Errorf("the compiler rejected:\n%s", src)
+			}
+		})
+	}
+}
+
+// TestGoHasNoBuiltinThatRunsText shows the language enforcing
+// no-code-is-run-from-text: Go has no eval. Its only functions that need no
+// import are the built-ins, and none of them takes code as text. A built-in
+// added to the language fails this test until someone has read what it does.
+func TestGoHasNoBuiltinThatRunsText(t *testing.T) {
+	known := []string{
+		"append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max", "min", "new",
+		"panic", "print", "println", "real", "recover",
+	}
+	for _, name := range types.Universe.Names() {
+		if _, builtin := types.Universe.Lookup(name).(*types.Builtin); builtin && !slices.Contains(known, name) {
+			t.Errorf("Go has a built-in function this test doesn't know, %s; check that it runs no code from text", name)
+		}
+	}
+	if compiles("package p\n\nfunc F() { eval(\"1 + 1\") }\n") {
+		t.Error("the compiler accepted a call to eval")
+	}
+}
+
 // TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage shows
-// the language enforcing sealed-variants-share-their-unit and ports-are-open:
+// the language enforcing sealed-variants-share-their-unit-of-code and no-port-is-sealed:
 // a type in another package can't implement an interface with an unexported
 // method, so a sealed union's variants are all in its package, and a port
 // sealed that way can't be implemented by the adapters and fakes outside it.

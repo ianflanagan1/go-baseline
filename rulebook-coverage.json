@@ -2,12 +2,20 @@
   "language": "go",
   "baseline": "github.com/ianflanagan1/go-baseline",
   "roles": {
-    "core": "Packages under a core/ directory: internal/core/ in an application, core/ in a library.",
-    "driven-adapter": "Packages under an adapters/driven/ directory.",
-    "driving-adapter": "Packages under an adapters/driving/ directory.",
-    "entrypoint": "Packages under cmd/.",
-    "orchestrator": "Packages under an orchestrators/ directory, such as internal/orchestrators/."
+    "decision": "By directory, not from the code: every package under a core/ directory, internal/core/ in an application and core/ in a library, is checked as the core. The checks don't tell a decision from a value: one directory holds both, and no check applies a rule to one and not the other. It has no helpers.",
+    "driven-adapter": "By directory, not from the code: every package under an adapters/driven/ directory is checked as driven-adapter code, whether or not it implements a port. Its helpers are the unexported identifiers of its packages, and the packages under an internal/ directory inside it, which Go lets only packages under that role's directory import; every other package there is a member.",
+    "driving-adapter": "By directory, not from the code: every package under an adapters/driving/ directory is checked as driving-adapter code. The checks don't tell a driving adapter's entry from the helpers that serve its contract, such as its controllers. Its helpers are the unexported identifiers of its packages, and the packages under an internal/ directory inside it, which Go lets only packages under that role's directory import; every other package there is a member.",
+    "entrypoint": "By directory, not from the code: every package under cmd/ is checked as entrypoint code, and no check looks for func main. Each main package is an entrypoint. Its helpers are the unexported identifiers of the main packages and every other package under cmd/, which belongs under cmd/internal/ so that only the entrypoints can import it.",
+    "fake": "The checks don't tell a fake: it has no directory, and no check looks for a service that implements a port and that only test code builds. One declared in a _test.go file is test code to every check. One declared in any other file is checked with the role its package's directory gives, and in a module with a program verify's deadcode step reports it, since no program calls it.",
+    "orchestrator": "By directory, not from the code: every package under an orchestrators/ directory is checked as orchestrator code, the ports it declares included. Its helpers are the unexported identifiers of its packages, and the packages under an internal/ directory inside it, which Go lets only packages under that role's directory import; every other package there is a member.",
+    "port": "The checks don't tell a port as a declaration. An interface declared in a package under orchestrators/ is checked as orchestrator code, with the rest of its package. Only the portbranch analyzer treats a port apart: in an orchestrator package it takes as read through a port the result of a method called on any interface the core doesn't declare, and of a call to any function value, whether or not a service holds it as a collaborator. It has no helpers.",
+    "value": "By directory, not from the code: every package under a core/ directory, internal/core/ in an application and core/ in a library, is checked as the core. The checks don't tell a decision from a value: one directory holds both, and no check applies a rule to one and not the other. It has no helpers."
   },
+  "reviewed-roles": [
+    "entrypoint",
+    "driving-adapter",
+    "driven-adapter"
+  ],
   "checks": {
     "configread": {
       "kind": "custom",
@@ -30,12 +38,12 @@
     "depguard-driven-adapters": {
       "kind": "tool",
       "tool": "golangci-lint",
-      "summary": "depguard's driven-adapters rule: driven adapters import only the core and other driven adapters."
+      "summary": "depguard's driven-adapters rule: of the project's packages, driven adapters import only the core and other driven adapters."
     },
     "depguard-driving-adapters": {
       "kind": "tool",
       "tool": "golangci-lint",
-      "summary": "depguard's driving-adapters rule: driving adapters import no driven adapter."
+      "summary": "depguard's driving-adapters rule: driving adapters import no driven adapter of the project's."
     },
     "depguard-orchestrators": {
       "kind": "tool",
@@ -59,7 +67,7 @@
     "forbidigo-effects": {
       "kind": "tool",
       "tool": "golangci-lint",
-      "summary": "forbidigo bans the clock, printing and the global loggers outside adapters and cmd/."
+      "summary": "forbidigo bans the clock, sleeping, timers and tickers (time.Now, Since, Until, Sleep, After, AfterFunc, Tick, NewTimer and NewTicker), printing and the global loggers, outside adapters/, cmd/ and test files."
     },
     "funlen-edges": {
       "kind": "tool",
@@ -68,12 +76,17 @@
     },
     "go-syntax": {
       "kind": "language",
-      "summary": "Go has no class inheritance, default or optional parameters, or field initialisers; the parser rejects the syntax other languages use for them."
+      "summary": "Go has no default or optional parameters and no field initialisers; the parser rejects the syntax other languages use for them."
     },
     "gochecknoglobals": {
       "kind": "tool",
       "tool": "golangci-lint",
       "summary": "Bans package-level variables everywhere."
+    },
+    "gochecknoinits": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "Bans init functions everywhere."
     },
     "gochecksumtype": {
       "kind": "tool",
@@ -90,6 +103,16 @@
       "tool": "golangci-lint",
       "summary": "golangci-lint fmt --diff, which the lint task runs, fails on any file gofumpt or goimports would change."
     },
+    "gosec-unsafe": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "gosec's G103 reports each use of unsafe.Pointer and the unsafe package's functions, outside test files."
+    },
+    "gosec-weak-random": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "gosec's G404 reports calls of the generators in math/rand and math/rand/v2, in every role, outside test files."
+    },
     "import-cycles": {
       "kind": "language",
       "summary": "The Go compiler rejects import cycles between packages."
@@ -99,10 +122,23 @@
       "tool": "golangci-lint",
       "summary": "ineffassign: no assigned value goes unread."
     },
+    "internal-packages": {
+      "kind": "language",
+      "summary": "A package under an internal/ directory can be imported only by packages under that directory's parent."
+    },
+    "modernize-slicescontains": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "modernize's slicescontains analyzer: a loop that only searches a slice for an element equal to a value is to be a call of slices.Contains."
+    },
     "modifies-parameter": {
       "kind": "tool",
       "tool": "golangci-lint",
       "summary": "revive's modifies-parameter rule, at confidence 0.5: no function assigns to one of its parameters, including from a closure."
+    },
+    "no-eval": {
+      "kind": "language",
+      "summary": "Go has no function or construct that runs a string as code: its built-in functions are a fixed list, and none takes code."
     },
     "nodefault": {
       "kind": "custom",
@@ -112,9 +148,23 @@
       "kind": "custom",
       "summary": "Analyzer: follows values read through a port and reports orchestrator conditions that depend on them."
     },
+    "revive-empty-block": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "revive's empty-block rule: no block is empty, the branch of an if among them."
+    },
+    "revive-error-return": {
+      "kind": "tool",
+      "tool": "golangci-lint",
+      "summary": "revive's error-return rule: an error is the last of a function's results."
+    },
     "role-of": {
       "kind": "custom",
-      "summary": "RoleOf gives each package one role from its directory alone, in every module."
+      "summary": "RoleOf gives each package one role from its directory alone, in every module. The core is one role to it, for decision and value code alike."
+    },
+    "static-typing": {
+      "kind": "language",
+      "summary": "Go is statically typed, at one level that no setting weakens: the compiler rejects a parameter, result, field or collection element with no declared type, and a value of type any used as another type without a type assertion or a type switch."
     },
     "sumtypedecl": {
       "kind": "custom",
@@ -136,9 +186,9 @@
       "kind": "custom",
       "summary": "verify follows go list -deps and reports a third-party package of the core or an orchestrator that imports an I/O package at any depth."
     },
-    "verify-release-unit": {
+    "verify-gitignore": {
       "kind": "custom",
-      "summary": "verify reports, in a module with an entrypoint, each other package outside internal/, and in a library with any role but adapters, each adapter that imports another module."
+      "summary": "verify reports a .gitignore without the line /cache/, or a project without one."
     },
     "verify-roles": {
       "kind": "custom",
@@ -146,50 +196,111 @@
     }
   },
   "clauses": {
-    "adapter-size-is-limited": {
+    "a-unit-of-code-holds-one-role": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "A package's directory gives every declaration in it the one role, so the checks never see two roles in a package: a decision beside a value object under core/, or a pure function beside a store under adapters/driven/, is checked as its directory's role and isn't reported."
+    },
+    "adapter-code-function-size-is-limited": {
       "coverage": "full",
       "checks": [
         "funlen-edges",
         "gocognit"
       ],
       "proof": [
-        "internal/core/baseline: TestConformance/adapter-size-is-limited"
+        "internal/core/baseline: TestConformance/adapter-code-function-size-is-limited"
       ]
     },
-    "applications-are-never-dependencies": {
-      "coverage": "full",
+    "adapters-and-entrypoints-perform-only-their-roles-operations": {
+      "coverage": "partial",
       "checks": [
-        "verify-release-unit"
+        "configread",
+        "gochecknoglobals"
       ],
+      "gap": "Only configuration read outside cmd/, and package-level state, are reported. depguard and forbidigo leave every I/O package to adapters/ and cmd/ alike, so a driving adapter that calls out over the network or opens a database, a driven adapter that serves requests, and an entrypoint that does either, aren't.",
       "proof": [
-        "internal/core/baseline: TestAModuleWithAnEntrypointIsAnApplication",
-        "internal/core/baseline: TestAnApplicationsPackagesOutsideInternalAreReported"
+        "internal/core/baseline: TestConformance/adapters-and-entrypoints-perform-only-their-roles-operations",
+        "internal/core/analyzers: TestConfigRead"
       ],
-      "note": "Go lets no other module import an internal/ package or a main package, so an application's packages can't be imported."
+      "intent": "planned"
+    },
+    "adapters-and-entrypoints-reach-only-their-roles-operations": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "verify-dependencies follows third-party imports only from the core and orchestrators, and asks only whether they reach I/O, not which operation."
     },
     "arguments-are-not-mutated": {
-      "coverage": "none"
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "at-most-one-listed-dependency-per-capability": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "baseline-settings-are-not-weakened": {
+      "coverage": "partial",
+      "checks": [
+        "verify-config"
+      ],
+      "gap": "golangci-lint reads a .golangci.json, .golangci.toml or .golangci.yaml ahead of .golangci.yml, and verify compares only .golangci.yml, so a project can leave that file as generated and put other settings in one of those.",
+      "proof": [
+        "internal/core/baseline: TestALinterConfigWeakerThanTheBaselinesIsReported",
+        "internal/core/baseline: TestAnEditedConfigIsReported"
+      ],
+      "intent": "planned",
+      "note": "Within .golangci.yml verify is stricter than the clause: a project can't add a linter or tighten a setting there either; that changes in go-baseline."
+    },
+    "built-values-are-not-changed": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "caches-live-under-the-cache-directory": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Working on the project",
+      "intent": "declined",
+      "reason": "The tools the baseline runs keep their caches outside the project; a check would need to know the cache files of every tool a project adds."
     },
     "check-fails-on-unformatted-files": {
-      "coverage": "full",
+      "coverage": "partial",
       "checks": [
         "golangci-fmt",
         "verify-config"
       ],
+      "gap": "golangci-lint reads a .golangci.json, .golangci.toml or .golangci.yaml ahead of .golangci.yml, and verify compares only .golangci.yml, so a project can leave that file as generated and put other settings in one of those. One whose formatters exclude the project's files makes golangci-lint fmt --diff pass on any of them.",
       "proof": [
         "internal/core/baseline: TestTheLintTaskFailsOnUnformattedFiles",
         "internal/core/baseline: TestTaskfileDriftIsReported"
-      ]
+      ],
+      "intent": "planned"
     },
-    "classes-extend-only-allowed-bases": {
-      "coverage": "full",
+    "check-task-runs-every-baseline-check": {
+      "coverage": "partial",
       "checks": [
-        "go-syntax"
+        "verify-config"
       ],
+      "gap": "The check task's own lines can't change, but which configuration its golangci-lint steps read can. golangci-lint reads a .golangci.json, .golangci.toml or .golangci.yaml ahead of .golangci.yml, and verify compares only .golangci.yml, so a project can leave that file as generated and put other settings in one of those.",
       "proof": [
-        "internal/core/baseline: TestGoHasNoSyntaxFor/classes-extend-only-allowed-bases"
+        "internal/core/baseline: TestACheckTaskThatRunsLessThanTheBaselinesIsReported",
+        "internal/core/baseline: TestTaskfileDriftIsReported"
       ],
-      "note": "Struct embedding, which promotes the embedded type's methods, is the nearest thing, and isn't checked."
+      "intent": "planned",
+      "note": "A project's own tasks are in Taskfile.project.yml, and Task refuses one that redefines a task of Taskfile.yml. verify is itself a step of the check task, and nothing outside the repository runs it."
+    },
+    "check-task-runs-mutation-testing-on-the-core": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "The test task fails a core package whose statement coverage is below 80%, which shows that a line ran, not that a test fails when it changes."
+    },
+    "checks-are-not-suppressed": {
+      "coverage": "partial",
+      "checks": [
+        "verify-config"
+      ],
+      "gap": "A //nolint, //lint:ignore or #nosec comment isn't reported; BASELINE.md, Working on the project, only asks for none. Nor is a file whose build constraint no analysed build satisfies. golangci-lint reads a .golangci.json, .golangci.toml or .golangci.yaml ahead of .golangci.yml, and verify compares only .golangci.yml, so a project can leave that file as generated and put other settings in one of those.",
+      "proof": [
+        "internal/core/baseline: TestALinterConfigWeakerThanTheBaselinesIsReported"
+      ],
+      "intent": "planned"
     },
     "closed-families-are-sealed": {
       "coverage": "partial",
@@ -201,51 +312,90 @@
       "proof": [
         "internal/core/baseline: TestConformance/closed-families-are-sealed",
         "internal/core/analyzers: TestSumTypeDecl"
+      ],
+      "intent": "declined",
+      "reason": "Whether an interface's variants are all its package's own is a design decision, which no static check can see until the interface is sealed."
+    },
+    "collection-operations-come-from-one-place": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Utility libraries such as samber/lo aren't banned, and nothing reports a project's own generic collection function."
+    },
+    "collection-operations-take-pure-functions": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "collection-types-name-their-element-type": {
+      "coverage": "full",
+      "checks": [
+        "static-typing"
+      ],
+      "proof": [
+        "internal/core/baseline: TestTheCompilerRejects/collection-types-name-their-element-type"
       ]
     },
-    "closed-types-have-no-way-around-their-factories": {
+    "collections-are-not-keyed-by-instance": {
       "coverage": "none",
-      "note": "Not decided for Go: see the TODO in the rulebook's constructors-only-store rule."
+      "intent": "planned"
     },
     "constructors-only-store-their-arguments": {
       "coverage": "none",
+      "intent": "planned",
       "note": "Go's constructors are New functions, which nothing tells apart from other functions yet."
     },
-    "core-imports-only-core": {
-      "coverage": "full",
-      "checks": [
-        "depguard-core"
-      ],
-      "proof": [
-        "internal/core/baseline: TestConformance/core-imports-only-core"
-      ]
-    },
-    "core-libraries-are-pure": {
-      "coverage": "full",
+    "core-calls-reach-nothing-impure": {
+      "coverage": "partial",
       "checks": [
         "verify-dependencies"
       ],
+      "gap": "Only imports of the I/O packages are followed, so third-party code that reads the clock, prints or logs through the time, fmt, log or log/slog packages, which aren't on that list, isn't detected.",
       "proof": [
         "internal/core/baseline: TestIODependenciesOfTheCoreAreReportedEvenIndirectly",
         "internal/core/baseline: TestImpurePackagesIncludeThoseReachingIOThroughOthers"
-      ]
+      ],
+      "intent": "planned",
+      "note": "go list -deps resolves the versions the project builds with, and following every import reaches further than following every call."
     },
-    "core-locals-are-not-reassigned-once-read": {
-      "case": "unsupported",
-      "coverage": "none"
+    "core-catches-expected-failures-it-calls": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "declined",
+      "reason": "Whether a third-party function panics for an expected failure is in its documentation, not its types, so no static check can tell which calls need a recover."
     },
-    "core-performs-no-effects": {
+    "core-does-nothing-impure": {
       "coverage": "partial",
       "checks": [
         "depguard-core",
         "forbidigo-effects",
         "gochecknoglobals"
       ],
-      "gap": "Keeping state that changes across calls in an instance's fields (held-state) isn't detected.",
+      "gap": "Keeping state that changes across calls in an instance's fields (held-state) isn't detected. Nor is the machine's local time zone: the core may call time.Unix, whose result is in the local zone, and use time.Local and time.LoadLocation.",
       "proof": [
-        "internal/core/baseline: TestConformance/core-performs-no-effects"
+        "internal/core/baseline: TestConformance/core-does-nothing-impure"
       ],
-      "note": "depguard bans the I/O packages, which include os (environment, files, standard streams), math/rand and crypto/rand; forbidigo bans the clock and printing, which live in pure packages."
+      "intent": "planned",
+      "note": "depguard bans the I/O packages, which include os (environment, files, standard streams), math/rand and crypto/rand; forbidigo bans the clock and printing, which live in pure packages, in a method as in a function."
+    },
+    "core-loading-does-nothing-impure": {
+      "coverage": "partial",
+      "checks": [
+        "gochecknoinits",
+        "gochecknoglobals",
+        "verify-dependencies"
+      ],
+      "gap": "A third-party package's load-time code is followed only through its imports. Only imports of the I/O packages are followed, so third-party code that reads the clock, prints or logs through the time, fmt, log or log/slog packages, which aren't on that list, isn't detected.",
+      "proof": [
+        "internal/core/baseline: TestConformance/core-loading-does-nothing-impure",
+        "internal/core/baseline: TestIODependenciesOfTheCoreAreReportedEvenIndirectly",
+        "internal/core/baseline: TestImpurePackagesIncludeThoseReachingIOThroughOthers"
+      ],
+      "intent": "planned",
+      "note": "The core's own load-time code would be its init functions and package-level variables' initialisers, which the linters ban."
+    },
+    "core-locals-are-not-reassigned-once-read": {
+      "case": "unsupported",
+      "coverage": "none",
+      "intent": "planned"
     },
     "core-receives-only-pure-values": {
       "coverage": "full",
@@ -256,85 +406,300 @@
         "internal/core/analyzers: TestCoreBoundary"
       ]
     },
-    "dependency-units-keep-their-role": {
+    "core-references-only-core": {
+      "coverage": "full",
+      "checks": [
+        "depguard-core"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/core-references-only-core"
+      ]
+    },
+    "core-tests-reference-only-the-core": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "depguard's rules leave out test files."
+    },
+    "core-throws-nothing": {
+      "case": "needs-statement",
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "planned",
+      "note": "BASELINE.md says the core never panics. The case allows the one panic that ends a function after an exhaustive switch."
+    },
+    "core-type-fields-are-not-nullable": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "core-types-are-built-only-by-their-factory-functions": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Core types",
+      "intent": "planned"
+    },
+    "core-types-have-factory-functions": {
+      "case": "hidden-fields",
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Core types",
+      "intent": "planned"
+    },
+    "decisions-driving-adapters-call-take-and-return-signature-types": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "dependency-declarations-keep-their-role": {
       "coverage": "partial",
       "checks": [
         "role-of",
+        "coreboundary",
         "verify-dependencies"
       ],
-      "gap": "The analyzers give a dependency on go-baseline the roles its directories give, so its core counts as core, but depguard doesn't: a project's core can import a dependency's orchestrator or adapter, which only an I/O import, at any depth, stops.",
+      "gap": "A first-party dependency's packages get the roles their directories give, not the roles their code gives, and only the analyzers use them, so its core/ counts as the core. depguard's rules name only the project's own module: a project's core can import a dependency's orchestrator, and its driving adapter a dependency's driven adapter. Only an I/O import, at any depth, stops the core or an orchestrator importing a dependency's adapter.",
       "proof": [
+        "internal/core/baseline: TestRolesFollowThePath",
+        "internal/core/analyzers: TestCoreBoundary",
         "internal/core/baseline: TestIODependenciesOfTheCoreAreReportedEvenIndirectly"
-      ]
+      ],
+      "intent": "planned"
     },
-    "driven-adapter-calls-no-orchestrator": {
+    "driven-adapter-code-calls-no-orchestrator": {
       "coverage": "partial",
       "checks": [
         "depguard-driven-adapters"
       ],
       "gap": "A driven adapter that declares an interface and is given an orchestrator through it by the entrypoint isn't caught; only importing one is.",
       "proof": [
-        "internal/core/baseline: TestConformance/driven-adapter-calls-no-orchestrator"
-      ]
+        "internal/core/baseline: TestConformance/driven-adapter-code-calls-no-orchestrator"
+      ],
+      "intent": "planned"
     },
-    "driven-adapter-imports-only-core-ports-and-driven-adapters": {
-      "coverage": "full",
+    "driven-adapter-code-converts-expected-failures": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "planned",
+      "note": "Which errors a dependency returns for expected failures isn't known to any tool, but the half that says driven-adapter code recovers nothing can be checked."
+    },
+    "driven-adapter-code-references-only-ports-and-values": {
+      "coverage": "partial",
       "checks": [
         "depguard-driven-adapters",
         "entrypoint-unimportable"
       ],
+      "gap": "The checks don't tell decision code from value code: both are under core/. A driven adapter that references or calls a decision function there isn't reported.",
       "proof": [
-        "internal/core/baseline: TestConformance/driven-adapter-imports-only-core-ports-and-driven-adapters"
-      ]
+        "internal/core/baseline: TestConformance/driven-adapter-code-references-only-ports-and-values",
+        "internal/core/baseline: TestTheCompilerLetsNoPackageImportAnEntrypoint"
+      ],
+      "intent": "planned",
+      "note": "Go is stricter than the clause on ports: a driven adapter can't import the orchestrator package that declares the port it implements, and needn't."
     },
-    "driving-adapter-calls-no-driven-adapter": {
+    "driving-adapter-catches-each-invocation": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "planned",
+      "note": "No check can find where every framework starts an invocation; one for net/http, reporting an http.Server whose handler isn't wrapped in the project's catch-all, is planned. BASELINE.md doesn't yet speak of a function given to the system timer."
+    },
+    "driving-adapter-code-calls-no-driven-adapter": {
       "coverage": "partial",
       "checks": [
         "depguard-driving-adapters"
       ],
-      "gap": "A driving adapter that declares an interface and is given a driven adapter through it by the entrypoint isn't caught; only importing one is.",
+      "gap": "A driving adapter that declares an interface and is given a driven adapter through it by the entrypoint isn't caught; only importing one of the project's own is. One given the system clock isn't reported either: no check tells the system adapters that driving-adapter code may call, the stopwatch and the deadlines, from the rest.",
       "proof": [
-        "internal/core/baseline: TestConformance/driving-adapter-calls-no-driven-adapter"
-      ]
+        "internal/core/baseline: TestConformance/driving-adapter-code-calls-no-driven-adapter"
+      ],
+      "intent": "planned"
     },
-    "driving-adapter-imports-only-core-orchestrators-and-driving-adapters": {
+    "driving-adapter-code-catches-everything-only-around-invocations": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "planned",
+      "note": "Needs a verify step reporting recover in adapters/driving/ outside the function the project marks as its catch-all."
+    },
+    "driving-adapter-code-only-reports-what-a-decision-returns": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Needs an analyzer that follows what decision code returns through driving-adapter code, as portbranch follows a port's value through an orchestrator."
+    },
+    "driving-adapter-code-references-only-orchestrators-and-the-core": {
       "coverage": "partial",
       "checks": [
         "depguard-driving-adapters",
         "entrypoint-unimportable"
       ],
-      "gap": "A port is declared in the orchestrator's package, which a driving adapter may import, so a driving adapter that takes a port isn't caught.",
+      "gap": "A port is declared in its orchestrator's package, which a driving adapter may import, so one that references a port isn't reported. Nor is a driven adapter of another module, such as go-shared-code: the rule names only the project's own, whether or not the adapter is a system adapter that driving-adapter code may call. A package under cmd/ that isn't a main package and isn't under an internal/ directory, such as cmd/wiring, can be imported; depguard's rule for this role doesn't name cmd/.",
       "proof": [
-        "internal/core/baseline: TestConformance/driving-adapter-imports-only-core-orchestrators-and-driving-adapters"
-      ]
+        "internal/core/baseline: TestConformance/driving-adapter-code-references-only-orchestrators-and-the-core",
+        "internal/core/baseline: TestTheCompilerLetsNoPackageImportAnEntrypoint"
+      ],
+      "intent": "planned",
+      "note": "The fixture internal/adapters/driving/timed shows the system stopwatch, which the clause allows, passing."
     },
-    "entrypoint-calls-only-driving-adapters": {
+    "driving-adapter-reports-failures-a-decision-returns": {
       "coverage": "none",
-      "note": "Needs a check of what cmd/ calls, other than constructors and Close."
+      "intent": "planned",
+      "note": "errcheck reports an error a driving adapter drops, under returned-failures-are-used; what it then tells its caller isn't checked, and BASELINE.md shows it only by example."
     },
-    "entrypoint-size-is-limited": {
+    "driving-adapter-reports-returned-failures": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "errcheck reports an error a driving adapter drops, under returned-failures-are-used; what it then tells its caller isn't checked, and BASELINE.md shows it only by example."
+    },
+    "each-project-table-has-an-id-type": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "each-public-id-has-a-type": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "entrypoint-catches-what-escapes": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "planned",
+      "note": "Needs a verify step reporting a main that doesn't follow BASELINE.md's pattern: recover, and os.Exit(1) on the error run returns."
+    },
+    "entrypoint-code-calls-only-driving-adapters-and-values": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Needs a check of what cmd/ calls, other than constructors and Close, and one that tells value code from decision code."
+    },
+    "entrypoint-code-function-size-is-limited": {
       "coverage": "full",
       "checks": [
         "funlen-edges"
       ],
       "proof": [
-        "internal/core/baseline: TestConformance/entrypoint-size-is-limited"
+        "internal/core/baseline: TestConformance/entrypoint-code-function-size-is-limited"
       ]
     },
-    "every-unit-has-one-role": {
-      "coverage": "full",
+    "entrypoint-code-wires-without-a-container": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-containers"
+      ],
+      "gap": "Only the common container libraries are banned. Wire, which generates the wiring as code, is allowed, and a service locator the project writes itself isn't detected.",
+      "proof": [
+        "internal/core/baseline: TestConformance/entrypoint-code-wires-without-a-container"
+      ],
+      "intent": "declined",
+      "reason": "An import check sees only the libraries it lists, and a hand-written locator is a map looked up by name, which no static check tells from other maps."
+    },
+    "enum-columns-admit-only-their-enums-values": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "enums-are-stored-as-their-values": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "error-types-of-other-roles-are-not-matched": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-core",
+        "depguard-orchestrators",
+        "depguard-driving-adapters",
+        "depguard-driven-adapters"
+      ],
+      "gap": "Only an error type in a package the matching code can't import is caught. One that an orchestrator's package declares, matched in a driving adapter; any error type matched in cmd/; and one a first-party dependency declares in another role, aren't.",
+      "proof": [
+        "internal/core/baseline: TestConformance/error-types-of-other-roles-are-not-matched"
+      ],
+      "intent": "planned",
+      "note": "Needs an analyzer reporting errors.Is and errors.As whose target another role's code declares. BASELINE.md, Errors, is stricter than the clause: it keeps a driving adapter from matching a database driver's error, which the clause now allows."
+    },
+    "every-declaration-has-one-role": {
+      "coverage": "partial",
       "checks": [
         "role-of",
         "verify-roles"
       ],
+      "gap": "A role is taken from the directory a package is in, not from what a declaration is, holds, implements and is built by. So a declaration in the wrong directory is checked as the wrong role, a service that fits no role, such as one holding both a port and a database client, isn't reported, and decision code and value code are one role. Only a package outside every role's directory is reported.",
       "proof": [
         "internal/core/baseline: TestRolesFollowThePath",
         "internal/core/baseline: TestAPackageOutsideEveryRolesDirectoryHasNoRole",
         "internal/core/baseline: TestAPackageWithNoRoleIsReported"
-      ]
+      ],
+      "intent": "planned"
+    },
+    "every-port-has-one-fake": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "every-port-has-one-set-of-contract-tests": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "every-project-table-has-a-uuid-id-primary-key": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "every-stored-value-comes-from-the-query": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "every-third-party-dependency-is-listed": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "go-baseline has no dependency list. verify-dependencies rejects only a third-party package that reaches an I/O package from the core or an orchestrator."
+    },
+    "every-type-has-one-shape": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "explicit-discards-give-a-reason": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "errcheck accepts every discard to the blank identifier, with a comment or without."
+    },
+    "external-driven-adapters-take-no-internal-values": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "external-driving-adapters-get-no-internal-values": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "external-driving-adapters-get-no-internal-values-from-decisions": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "factory-functions-take-signature-types": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "failure-branches-act": {
+      "coverage": "partial",
+      "checks": [
+        "revive-empty-block"
+      ],
+      "gap": "A failure branch that returns success, such as return nil in a function that returns an error, isn't reported.",
+      "proof": [
+        "internal/core/baseline: TestConformance/failure-branches-act"
+      ],
+      "intent": "planned"
+    },
+    "fake-and-adapter-tests-run-the-contract-tests": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "fake-code-performs-only-held-state": {
+      "coverage": "partial",
+      "checks": [
+        "gochecknoglobals"
+      ],
+      "gap": "No check tells fake code, so only what is banned in every role is caught: a package-level variable. A fake that writes a file, reads the clock, returns random IDs or prints isn't reported, in a test file or under adapters/.",
+      "proof": [
+        "internal/core/baseline: TestConformance/fake-code-performs-only-held-state"
+      ],
+      "intent": "planned"
+    },
+    "fake-code-references-only-ports-values-and-fakes": {
+      "coverage": "none",
+      "intent": "planned"
     },
     "field-collections-are-not-changed": {
-      "coverage": "none"
+      "coverage": "none",
+      "intent": "planned"
     },
     "field-initialisers-are-constants": {
       "coverage": "full",
@@ -346,32 +711,84 @@
       ]
     },
     "fields-are-assigned-only-at-construction": {
-      "coverage": "none"
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "fields-are-typed": {
+      "coverage": "full",
+      "checks": [
+        "static-typing"
+      ],
+      "proof": [
+        "internal/core/baseline: TestTheCompilerRejects/fields-are-typed"
+      ]
+    },
+    "folds-compute-no-value-a-narrower-operation-names": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Go's shared collection operations, the fold among them, don't exist yet."
     },
     "formatter-settings-come-from-the-baseline": {
-      "coverage": "full",
+      "coverage": "partial",
       "checks": [
         "verify-config"
       ],
+      "gap": "golangci-lint reads a .golangci.json, .golangci.toml or .golangci.yaml ahead of .golangci.yml, and verify compares only .golangci.yml, so a project can leave that file as generated and put other settings in one of those.",
       "proof": [
         "internal/core/baseline: TestAnEditedConfigIsReported"
       ],
+      "intent": "planned",
       "note": "gofumpt and goimports are configured in .golangci.yml, which verify keeps as the baseline generates it."
     },
-    "invariant-types-are-closed": {
-      "coverage": "none",
-      "note": "Not decided for Go: see the TODO in the rulebook's constructors-only-store rule."
-    },
-    "library-adapters-use-only-the-standard-library": {
+    "gitignore-ignores-the-cache-directory": {
       "coverage": "full",
       "checks": [
-        "role-of",
-        "verify-release-unit"
+        "verify-gitignore"
       ],
       "proof": [
-        "internal/core/baseline: TestALibrarysAdaptersUseOnlyTheStandardLibraryAndItsOwnPackages",
-        "internal/core/baseline: TestALibraryOfOnlyAdaptersMayUseAnyLibrary"
+        "internal/core/baseline: TestTheCacheDirectoryMustBeIgnored",
+        "internal/core/baseline: TestTheCacheLineMayEndWithSpacesOrACarriageReturn",
+        "internal/core/baseline: TestAMissingGitignoreIsReported"
       ]
+    },
+    "id-columns-reject-other-uuid-versions": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "id-types-accept-only-uuidv7s": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "ids-are-held-as-their-id-types": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "ids-say-nothing-about-when-rows-were-made": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "invocation-catch-all-keeps-internals-from-outside-callers": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "declined",
+      "reason": "What a catch-all writes to its caller isn't decidable statically."
+    },
+    "invocation-catch-all-reports-a-failure": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "declined",
+      "reason": "What a catch-all writes to its caller and its log isn't decidable statically."
+    },
+    "loops-compute-no-value-an-operation-names": {
+      "coverage": "partial",
+      "checks": [
+        "modernize-slicescontains"
+      ],
+      "gap": "Only a loop that searches a slice for an element equal to a value is reported. One that fills a list or a map, counts, totals, keeps the least or greatest, or tests each element with anything but ==, isn't.",
+      "proof": [
+        "internal/core/baseline: TestConformance/loops-compute-no-value-an-operation-names"
+      ],
+      "intent": "planned"
     },
     "matches-on-closed-families-are-exhaustive": {
       "coverage": "full",
@@ -397,16 +814,49 @@
         "internal/core/baseline: TestConformance/matches-on-closed-families-have-no-default-arm",
         "internal/core/analyzers: TestNoDefault"
       ],
-      "note": "A default arm doesn't excuse a missing case, and nodefault reports one beside cases that name every value. A switch on another module's type may have one. Go needs no catch-all."
+      "note": "A default arm doesn't excuse a missing case, and nodefault reports one beside cases that name every value, whatever it holds. A switch on another module's type may have one. The clause's exception doesn't arise in Go: the panic that ends a function after an exhaustive switch goes after the switch."
     },
-    "no-import-cycles": {
+    "no-boolean-fields": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "no-boolean-parameters": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "no-cast-asserts-an-unchecked-type": {
+      "coverage": "partial",
+      "checks": [
+        "gosec-unsafe"
+      ],
+      "gap": "A single-result type assertion, which panics on a value of another type, isn't reported. Test files aren't checked.",
+      "proof": [
+        "internal/core/baseline: TestConformance/no-cast-asserts-an-unchecked-type"
+      ],
+      "intent": "planned"
+    },
+    "no-code-is-run-from-text": {
       "coverage": "full",
       "checks": [
-        "import-cycles"
+        "no-eval"
       ],
       "proof": [
-        "internal/core/baseline: TestTheCompilerRejectsImportCycles"
+        "internal/core/baseline: TestGoHasNoBuiltinThatRunsText"
       ]
+    },
+    "no-hand-written-scripted-doubles": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "no-hooks-reached-through-catch-all-parameters": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Needs a check that reports a declared String, GoString, Format, LogValue, MarshalJSON, UnmarshalJSON, MarshalText or UnmarshalText method."
+    },
+    "no-mocking-libraries": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "gomock, mockery and testify's mock package aren't banned."
     },
     "no-optional-parameters": {
       "coverage": "full",
@@ -427,7 +877,119 @@
         "internal/core/baseline: TestGoHasNoSyntaxFor/no-parameter-default-values"
       ]
     },
-    "only-entrypoints-read-configuration": {
+    "no-port-is-sealed": {
+      "coverage": "full",
+      "checks": [
+        "unexported-methods"
+      ],
+      "proof": [
+        "internal/core/baseline: TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage"
+      ],
+      "note": "A port sealed with an unexported method can't be implemented by a driven adapter or a fake in another package, so the program doesn't compile."
+    },
+    "no-positional-groups": {
+      "case": "multiple-results",
+      "coverage": "partial",
+      "checks": [
+        "revive-error-return"
+      ],
+      "gap": "Only an error that isn't the last result is reported. Two values, two values and an error, a value with both a boolean and an error, and a core type returned by value beside an error or a boolean from outside its package, aren't.",
+      "proof": [
+        "internal/core/baseline: TestConformance/no-positional-groups"
+      ],
+      "intent": "planned"
+    },
+    "no-reference-cycles": {
+      "coverage": "full",
+      "checks": [
+        "import-cycles"
+      ],
+      "proof": [
+        "internal/core/baseline: TestTheCompilerRejectsImportCycles"
+      ],
+      "note": "A sealed union and its variants are one package, which unexported-methods holds them to, so a cycle through a variant is a cycle between packages."
+    },
+    "no-standard-library-or-third-party-code-builds-core-types": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "reflect.New, reflect.NewAt and reflect.Zero aren't banned."
+    },
+    "no-third-party-feature-performs-a-reserved-operation": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "go-baseline has no dependency list to name each release unit's banned features."
+    },
+    "no-type-turns-checking-off": {
+      "coverage": "full",
+      "checks": [
+        "static-typing"
+      ],
+      "proof": [
+        "internal/core/baseline: TestTheCompilerRejects/no-type-turns-checking-off"
+      ],
+      "note": "unsafe.Pointer converts to any pointer type untested, which no-cast-asserts-an-unchecked-type covers."
+    },
+    "no-value-depends-on-session-settings": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "nothing-is-called-by-a-computed-name": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "reflect's Value.MethodByName and Value.Call aren't banned."
+    },
+    "nothing-is-imported-by-a-computed-path": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-core",
+        "depguard-orchestrators"
+      ],
+      "gap": "depguard keeps the plugin package from the core and orchestrators only: an adapter or entrypoint may load a plugin.",
+      "proof": [
+        "internal/core/baseline: TestConformance/nothing-is-imported-by-a-computed-path"
+      ],
+      "intent": "planned"
+    },
+    "nothing-runs-when-a-value-is-collected": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "runtime.SetFinalizer and runtime.AddCleanup aren't banned."
+    },
+    "nothing-sleeps": {
+      "coverage": "partial",
+      "checks": [
+        "forbidigo-effects"
+      ],
+      "gap": "forbidigo is off under adapters/ and cmd/ and in test files, so an adapter or entrypoint that sleeps isn't reported, and neither is a third-party function that sleeps. In the core and orchestrators it reports time.Sleep, time.After and the timers, but not a wait on a context whose deadline is all there is to wait for.",
+      "proof": [
+        "internal/core/baseline: TestConformance/nothing-sleeps"
+      ],
+      "intent": "planned",
+      "note": "forbidigo's message for time.Sleep says to take the clock through a port, which this clause rules out as well; BASELINE.md's retry loop sleeps through one."
+    },
+    "nullable-columns-hold-only-variant-data": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "one-factory-function-calls-each-constructor": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "only-adapter-and-entrypoint-code-references-plain-data-types": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Needs a check that tells a plain-data type, a struct with exported fields, and reports a reference to one from the core, an orchestrator or a port."
+    },
+    "only-decisions-and-internal-adapters-read-internal-values": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "only-driven-adapters-and-fakes-stand-in-for-ports": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "BASELINE.md's example declares a fake in an orchestrator's test file, which this clause rules out."
+    },
+    "only-entrypoint-code-reads-configuration": {
       "coverage": "full",
       "checks": [
         "configread"
@@ -437,40 +999,37 @@
         "internal/core/analyzers: TestTheEnvAdapterMayReadConfiguration"
       ]
     },
-    "open-interfaces-are-not-matched-by-type": {
+    "only-test-code-references-fake-code": {
       "coverage": "none",
-      "note": "Needs a check of type switches and assertions on interfaces that aren't sealed."
+      "intent": "planned",
+      "note": "In a module with a program, verify's deadcode step reports a fake declared outside a test file, since no program calls it, so there a fake can only be test code today."
     },
-    "orchestrator-branches-only-on-core-results": {
+    "only-the-shared-id-unit-of-code-uses-third-party-uuid-code": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "open-interfaces-are-not-matched-by-implementation": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Needs a check of type switches and assertions on interfaces that aren't sealed, other than error."
+    },
+    "orchestrator-code-branches-only-on-decisions": {
       "coverage": "partial",
       "checks": [
         "portbranch"
       ],
-      "gap": "Computing with a port's value without branching on it, such as sorting it, isn't detected.",
+      "gap": "Any call into the core clears a port's value, since the checks don't tell a core type's method from a decision function: a condition on what a method derives from a port's value, such as whether a list of orders is empty, isn't reported. Computing with a port's value without branching on it, such as sorting it, isn't detected either.",
       "proof": [
         "internal/core/analyzers: TestPortBranch"
-      ]
-    },
-    "orchestrator-imports-no-adapter": {
-      "coverage": "full",
-      "checks": [
-        "depguard-orchestrators",
-        "entrypoint-unimportable"
       ],
-      "proof": [
-        "internal/core/baseline: TestConformance/orchestrator-imports-no-adapter"
-      ]
+      "intent": "planned"
     },
-    "orchestrator-libraries-are-pure": {
-      "coverage": "full",
-      "checks": [
-        "verify-dependencies"
-      ],
-      "proof": [
-        "internal/core/baseline: TestVerifyReportsIODependencies"
-      ]
+    "orchestrator-code-catches-nothing": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "planned"
     },
-    "orchestrator-performs-no-effects": {
+    "orchestrator-code-performs-no-effects": {
       "coverage": "partial",
       "checks": [
         "depguard-orchestrators",
@@ -479,8 +1038,86 @@
       ],
       "gap": "Keeping state that changes across calls in an instance's fields (held-state) isn't detected.",
       "proof": [
-        "internal/core/baseline: TestConformance/orchestrator-performs-no-effects"
-      ]
+        "internal/core/baseline: TestConformance/orchestrator-code-performs-no-effects"
+      ],
+      "intent": "planned"
+    },
+    "orchestrator-code-reaches-nothing-impure": {
+      "coverage": "partial",
+      "checks": [
+        "verify-dependencies"
+      ],
+      "gap": "Only imports of the I/O packages are followed, so third-party code that reads the clock, prints or logs through the time, fmt, log or log/slog packages, which aren't on that list, isn't detected.",
+      "proof": [
+        "internal/core/baseline: TestIODependenciesOfAnOrchestratorAreReportedEvenIndirectly",
+        "internal/core/baseline: TestVerifyReportsIODependencies",
+        "internal/core/baseline: TestImpurePackagesIncludeThoseReachingIOThroughOthers"
+      ],
+      "intent": "planned",
+      "note": "Following every import reaches a package whose load-time code alone runs, as well as every function that could be called."
+    },
+    "orchestrator-code-references-no-entrypoint-or-adapter-code": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-orchestrators",
+        "entrypoint-unimportable"
+      ],
+      "gap": "A package under cmd/ that isn't a main package and isn't under an internal/ directory, such as cmd/wiring, can be imported; depguard's rule for this role doesn't name cmd/.",
+      "proof": [
+        "internal/core/baseline: TestConformance/orchestrator-code-references-no-entrypoint-or-adapter-code",
+        "internal/core/baseline: TestTheCompilerLetsNoPackageImportAnEntrypoint"
+      ],
+      "intent": "planned"
+    },
+    "orchestrator-code-runs-no-loop-until-stopped": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Needs a check that reports a loop in an orchestrator package with no condition, or whose condition is a port's stop signal."
+    },
+    "orchestrator-code-throws-nothing": {
+      "case": "needs-statement",
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "planned"
+    },
+    "orchestrator-is-given-ports": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-orchestrators",
+        "depguard-containers",
+        "verify-dependencies"
+      ],
+      "gap": "A collaborator of a pure standard-library or third-party type that isn't a port, such as a *slog.Logger or an io.Writer, isn't reported, nor is an interface the orchestrator didn't declare.",
+      "proof": [
+        "internal/core/baseline: TestConformance/orchestrator-is-given-ports"
+      ],
+      "intent": "planned",
+      "note": "An orchestrator can't import an adapter, a container or a client library that does I/O, so it can't take one."
+    },
+    "orchestrator-takes-and-returns-signature-types": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "orchestrator-test-case-calls-one-use-case-once": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "other-roles-reach-only-members": {
+      "coverage": "partial",
+      "checks": [
+        "internal-packages"
+      ],
+      "gap": "A helper in a package that isn't under its role's internal/ directory counts as a member, so other roles' code can import it. So does a package under cmd/ outside cmd/internal/.",
+      "proof": [
+        "internal/core/baseline: TestTheCompilerKeepsARolesHelpersFromOtherRoles"
+      ],
+      "intent": "declined",
+      "reason": "Whether a package is a member, such as one use case, or a helper is a matter of what it's for, which no static check can see; the baseline lets its location decide.",
+      "note": "Go is stricter than the clause: an entrypoint can't import a helper under another role's internal/ directory to build it."
+    },
+    "outside-facing-code-names-no-internal-type": {
+      "coverage": "none",
+      "intent": "planned"
     },
     "parameters-are-not-reassigned": {
       "coverage": "full",
@@ -491,7 +1128,51 @@
         "internal/core/baseline: TestConformance/parameters-are-not-reassigned"
       ]
     },
-    "port-units-follow-typing": {
+    "parameters-are-typed": {
+      "coverage": "full",
+      "checks": [
+        "static-typing"
+      ],
+      "proof": [
+        "internal/core/baseline: TestTheCompilerRejects/parameters-are-typed"
+      ]
+    },
+    "port-is-declared-by-its-caller": {
+      "coverage": "full",
+      "checks": [
+        "depguard-orchestrators"
+      ],
+      "proof": [
+        "internal/core/baseline: TestConformance/port-is-declared-by-its-caller"
+      ],
+      "note": "An orchestrator can't import an adapter, so it can't take an interface an adapter declares."
+    },
+    "port-is-named-in-domain-terms": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Databases",
+      "intent": "declined",
+      "reason": "Whether a name is in the domain's terms, or a method is shaped for one thing its caller does, is a judgement no static check can make."
+    },
+    "port-methods-need-no-call-order": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "port-methods-return-expected-failures": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Errors",
+      "intent": "declined",
+      "reason": "A port method can't throw; it returns error, and whether its result also carries every expected failure isn't decidable."
+    },
+    "port-methods-return-no-interfaces": {
+      "coverage": "convention-only",
+      "where": "BASELINE.md, Databases",
+      "intent": "planned"
+    },
+    "port-methods-take-and-return-signature-types": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "port-units-of-code-follow-interface-implementation": {
       "case": "structural",
       "coverage": "partial",
       "checks": [
@@ -499,33 +1180,58 @@
       ],
       "gap": "A package of interfaces that other orchestrators import is an orchestrator like any other, so a ports package isn't caught.",
       "proof": [
-        "internal/core/baseline: TestConformance/port-units-follow-typing"
+        "internal/core/baseline: TestConformance/port-units-of-code-follow-interface-implementation"
       ],
+      "intent": "planned",
       "note": "A driven adapter can't import the orchestrator that declares the port it implements."
     },
-    "ports-are-open": {
+    "public-id-columns-are-unique-uuidv4s": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "public-id-types-accept-only-uuidv4s": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "queries-are-built-in-driven-adapter-code": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "queries-are-query-data": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "queries-perform-no-impure-operation": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "references-are-not-compared-by-identity": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "reserved-operations-are-performed-only-by-their-system-adapters": {
+      "coverage": "partial",
+      "checks": [
+        "forbidigo-effects",
+        "depguard-core",
+        "depguard-orchestrators",
+        "gosec-weak-random"
+      ],
+      "gap": "In the core and orchestrators the clock, the timers and both random packages are banned. Under adapters/ and cmd/ only math/rand is reported: an adapter or entrypoint that reads the clock, measures a duration, starts a timer or ticker or draws from crypto/rand isn't. Nowhere is a time zone read (time.Local, time.LoadLocation, the local result of time.Unix), a context given a deadline outside the core, or an ID laid out by hand, reported.",
+      "proof": [
+        "internal/core/baseline: TestConformance/reserved-operations-are-performed-only-by-their-system-adapters"
+      ],
+      "intent": "planned",
+      "note": "No check exempts a system adapter by name: they are in go-shared-code, which a project's checks don't lint. gosec's message says to use crypto/rand, which is reserved too, and BASELINE.md still has a project write its own clock adapter."
+    },
+    "return-types-are-declared-where-called-from-outside": {
       "coverage": "full",
       "checks": [
-        "unexported-methods"
+        "static-typing"
       ],
       "proof": [
-        "internal/core/baseline: TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage"
-      ],
-      "note": "A port sealed with an unexported method can't be implemented by a driven adapter or a test fake in another package, so the program doesn't compile."
-    },
-    "ports-declared-by-their-user": {
-      "coverage": "full",
-      "checks": [
-        "depguard-orchestrators"
-      ],
-      "proof": [
-        "internal/core/baseline: TestConformance/ports-declared-by-their-user"
-      ],
-      "note": "An orchestrator can't import an adapter, so it can't take an interface an adapter declares."
-    },
-    "ports-named-in-domain-terms": {
-      "coverage": "convention",
-      "where": "BASELINE.md, Databases"
+        "internal/core/baseline: TestTheCompilerRejects/return-types-are-declared-where-called-from-outside"
+      ]
     },
     "returned-failures-are-used": {
       "coverage": "partial",
@@ -537,9 +1243,10 @@
       "gap": "A call that drops all of a (T, bool) result, as a statement, isn't reported.",
       "proof": [
         "internal/core/baseline: TestConformance/returned-failures-are-used"
-      ]
+      ],
+      "intent": "planned"
     },
-    "sealed-variants-share-their-unit": {
+    "sealed-variants-share-their-unit-of-code": {
       "coverage": "full",
       "checks": [
         "unexported-methods"
@@ -548,15 +1255,107 @@
         "internal/core/baseline: TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage"
       ]
     },
-    "wired-without-a-container": {
+    "sentinels-are-null-or-a-found-flag": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "BASELINE.md, Core types, states the half about a core type outside its package, which returns *T; nothing states that no value of a result's own type means failure."
+    },
+    "sentinels-report-only-absence": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "shared-collections-are-not-changed": {
+      "case": "unsupported",
       "coverage": "partial",
       "checks": [
-        "depguard-containers"
+        "modifies-parameter"
       ],
-      "gap": "Only the common container libraries are banned. Wire, which generates the wiring as code, is allowed.",
+      "gap": "Only an append assigned back to the slice parameter itself is reported, as a parameter reassigned. An append to a passed slice under another name, a write to an element, a sort, a delete or a clear, of a collection the function was passed or has already shared, isn't.",
       "proof": [
-        "internal/core/baseline: TestConformance/wired-without-a-container"
-      ]
+        "internal/core/baseline: TestConformance/shared-collections-are-not-changed"
+      ],
+      "intent": "planned"
+    },
+    "sql-text-comes-only-from-the-query-compiler": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "standard-library-and-third-party-code-takes-sources-from-the-system-adapters": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "the-core-takes-no-plain-data": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "the-internal-wrapper-shows-nothing-it-holds": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "It is to be shown by tests of the wrapper in go-shared-code, one for each of its text, debug, JSON and logged forms, not by a check of projects."
+    },
+    "the-schema-supplies-no-values": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "type-checker-runs-at-its-strictest": {
+      "coverage": "full",
+      "checks": [
+        "static-typing"
+      ],
+      "proof": [
+        "internal/core/baseline: TestTheCompilerRejects/type-checker-runs-at-its-strictest"
+      ],
+      "note": "Go's type checker is its compiler, which has no strictness to turn down. The linters' settings are baseline-settings-are-not-weakened's."
+    },
+    "types-declare-every-method-they-have": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Needs a check that reports a struct's embedded field; an interface may embed another."
+    },
+    "unknown-types-stay-in-adapter-and-entrypoint-code": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Needs a check that reports any, and a collection of it, declared in the core, an orchestrator or a port."
+    },
+    "value-code-decides-nothing": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "No check tells value code from decision code, and none looks at what a core type's method works out."
+    },
+    "value-code-references-only-value-code": {
+      "coverage": "partial",
+      "checks": [
+        "depguard-core"
+      ],
+      "gap": "The checks don't tell decision code from value code: both are under core/. A core type that references a decision function isn't reported; only a reference to a package in another role's directory is.",
+      "proof": [
+        "internal/core/baseline: TestConformance/value-code-references-only-value-code"
+      ],
+      "intent": "planned"
+    },
+    "values-have-immutable-types": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "variant-data-columns-are-constrained-to-their-variants": {
+      "coverage": "none",
+      "intent": "planned"
+    },
+    "visibility-is-not-bypassed": {
+      "coverage": "partial",
+      "checks": [
+        "gosec-unsafe"
+      ],
+      "gap": "A //go:linkname directive isn't reported, nor an unexported field read through reflect alone, which needs no unsafe. Test files aren't checked.",
+      "proof": [
+        "internal/core/baseline: TestConformance/visibility-is-not-bypassed"
+      ],
+      "intent": "planned"
+    },
+    "writes-that-belong-together-are-one-port-call": {
+      "coverage": "none",
+      "intent": "planned",
+      "note": "Which writes a use case needs made together isn't in the code, so a check can reach little of this."
     }
   }
 }

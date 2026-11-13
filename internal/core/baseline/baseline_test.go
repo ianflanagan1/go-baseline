@@ -3,6 +3,7 @@ package baseline_test
 import (
 	"errors"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -24,13 +25,14 @@ func matchingProject(t *testing.T) baseline.Project {
 		t.Fatal(err)
 	}
 	return baseline.Project{
-		GoMod:    []byte(goMod),
-		Golangci: golangci,
-		Guide:    baseline.Guide(),
-		Workflow: baseline.Workflow(),
-		Taskfile: baseline.Taskfile(),
-		Devbox:   []byte(devbox),
-		Dirs:     []string{"cmd", "cmd/app", "internal", "internal/core", "internal/core/greet"},
+		GoMod:     []byte(goMod),
+		Golangci:  golangci,
+		Guide:     baseline.Guide(),
+		Workflow:  baseline.Workflow(),
+		Taskfile:  baseline.Taskfile(),
+		Devbox:    []byte(devbox),
+		Gitignore: []byte(".devbox/\n/cache/\n"),
+		Dirs:      []string{"cmd", "cmd/app", "internal", "internal/core", "internal/core/greet"},
 	}
 }
 
@@ -167,6 +169,53 @@ func TestTaskfileDriftIsReported(t *testing.T) {
 	assertOneProblem(t, verify(t, p), "put the project's own tasks in Taskfile.project.yml")
 }
 
+// TestALinterConfigWeakerThanTheBaselinesIsReported shows verify catching
+// the ways a project's .golangci.yml can do less than the one the baseline
+// generates.
+func TestALinterConfigWeakerThanTheBaselinesIsReported(t *testing.T) {
+	for _, tc := range []struct{ name, from, to string }{
+		{"a linter the baseline enables is disabled", "    - funlen\n", ""},
+		{"a limit the baseline sets is raised", "      lines: 50\n", "      lines: 500\n"},
+		{
+			"an exclusion rule for the project's own code is added",
+			"  exclusions:\n    rules:\n",
+			"  exclusions:\n    rules:\n      - path: internal/core/legacy/\n        linters:\n          - depguard\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := matchingProject(t)
+			weakened := strings.Replace(string(p.Golangci), tc.from, tc.to, 1)
+			if weakened == string(p.Golangci) {
+				t.Fatalf("the generated config no longer has %q", tc.from)
+			}
+			p.Golangci = []byte(weakened)
+			assertOneProblem(t, verify(t, p), ".golangci.yml differs")
+		})
+	}
+}
+
+// TestACheckTaskThatRunsLessThanTheBaselinesIsReported shows verify catching
+// the ways a project's check task can run less than the one the baseline
+// generates.
+func TestACheckTaskThatRunsLessThanTheBaselinesIsReported(t *testing.T) {
+	for _, tc := range []struct{ name, from, to string }{
+		{"it doesn't run verify", "      - go tool go-baseline verify\n", ""},
+		{"it lints only part of the code", "      - golangci-lint run\n", "      - golangci-lint run ./internal/...\n"},
+		{"a step ignores its exit status", "      - golangci-lint run\n", "      - golangci-lint run || true\n"},
+		{"it lints with another configuration file", "      - golangci-lint run\n", "      - golangci-lint run --config lenient.yml\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := matchingProject(t)
+			weakened := strings.Replace(string(p.Taskfile), tc.from, tc.to, 1)
+			if weakened == string(p.Taskfile) {
+				t.Fatalf("the generated Taskfile no longer has %q", tc.from)
+			}
+			p.Taskfile = []byte(weakened)
+			assertOneProblem(t, verify(t, p), "Taskfile.yml differs")
+		})
+	}
+}
+
 func TestAMissingGuideIsReported(t *testing.T) {
 	p := matchingProject(t)
 	p.Guide = nil
@@ -236,6 +285,35 @@ func TestAMissingDevboxIsReported(t *testing.T) {
 	assertOneProblem(t, verify(t, p), "devbox.json is missing")
 }
 
+func TestTheCacheDirectoryMustBeIgnored(t *testing.T) {
+	for _, tc := range []struct{ name, gitignore, want string }{
+		{"no line for it", ".devbox/\n", ".gitignore must have the line /cache/"},
+		{"ignored at any depth", "cache/\n", ".gitignore must have the line /cache/"},
+		{"a file of that name", "/cache\n", ".gitignore must have the line /cache/"},
+		{"commented out", "# /cache/\n", ".gitignore must have the line /cache/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := matchingProject(t)
+			p.Gitignore = []byte(tc.gitignore)
+			assertOneProblem(t, verify(t, p), tc.want)
+		})
+	}
+}
+
+func TestTheCacheLineMayEndWithSpacesOrACarriageReturn(t *testing.T) {
+	p := matchingProject(t)
+	p.Gitignore = []byte("/cache/  \r\n")
+	if problems := verify(t, p); problems != nil {
+		t.Fatalf("got %q", problems)
+	}
+}
+
+func TestAMissingGitignoreIsReported(t *testing.T) {
+	p := matchingProject(t)
+	p.Gitignore = nil
+	assertOneProblem(t, verify(t, p), ".gitignore is missing")
+}
+
 func TestDirectoriesTheLayoutGuideRulesOutAreReported(t *testing.T) {
 	for _, dir := range []string{"src", "pkg", "internal/util", "internal/common", "internal/app/helpers"} {
 		t.Run(dir, func(t *testing.T) {
@@ -255,49 +333,27 @@ func own(dir string, imports ...string) baseline.Package {
 	}
 }
 
-func TestAModuleWithAnEntrypointIsAnApplication(t *testing.T) {
-	if !baseline.IsApplication("example.com/app", []baseline.Package{own("cmd/app"), own("internal/core/rates")}) {
-		t.Fatal("a module with cmd/app isn't an application")
+func TestAModuleWithAProgramInCmdHasAnEntrypoint(t *testing.T) {
+	if !baseline.HasEntrypoint("example.com/app", []baseline.Package{own("cmd/app"), own("internal/core/rates")}) {
+		t.Fatal("a module with cmd/app has no entrypoint")
 	}
-	if baseline.IsApplication("example.com/app", []baseline.Package{own("core/rates"), own("adapters/driven/clock")}) {
-		t.Fatal("a module without an entrypoint is an application")
-	}
-}
-
-func TestAnApplicationsPackagesOutsideInternalAreReported(t *testing.T) {
-	for _, dir := range []string{"", "core/rates", "adapters/driven/clock", "app"} {
-		t.Run(dir, func(t *testing.T) {
-			problems := baseline.ReleaseUnitProblems("example.com/app", []baseline.Package{
-				own("cmd/app"), own("internal/core/rates"), own(dir),
-			})
-			assertOneProblem(t, problems, "move the package under internal/")
-		})
+	if baseline.HasEntrypoint("example.com/app", []baseline.Package{own("core/rates"), own("adapters/driven/clock")}) {
+		t.Fatal("a module without cmd/ has an entrypoint")
 	}
 }
 
-func TestALibraryMayKeepAnyRoleOutsideInternal(t *testing.T) {
-	problems := baseline.ReleaseUnitProblems("example.com/app", []baseline.Package{
-		own("core/rates"), own("rates"), own("adapters/driven/clock", "time"),
-	})
-	if problems != nil {
-		t.Fatalf("got %q", problems)
-	}
-}
-
-func TestALibrarysAdaptersUseOnlyTheStandardLibraryAndItsOwnPackages(t *testing.T) {
-	problems := baseline.ReleaseUnitProblems("example.com/app", []baseline.Package{
-		own("core/rates"),
-		own("adapters/driven/store", "database/sql", "example.com/app/core/rates", "example.com/pgx"),
-	})
-	assertOneProblem(t, problems, "example.com/app/adapters/driven/store imports example.com/pgx")
-}
-
-func TestALibraryOfOnlyAdaptersMayUseAnyLibrary(t *testing.T) {
-	problems := baseline.ReleaseUnitProblems("example.com/app", []baseline.Package{
-		own("adapters/driven/store", "example.com/pgx"), own("adapters/driving/server", "example.com/router"),
-	})
-	if problems != nil {
-		t.Fatalf("got %q", problems)
+func TestDeadcodeLooksOnlyUnderCmdAndInternal(t *testing.T) {
+	filter := regexp.MustCompile(baseline.DeadcodeFilter("example.com/app"))
+	for path, want := range map[string]bool{
+		"example.com/app/cmd/app":             true,
+		"example.com/app/internal/core/rates": true,
+		"example.com/app/core/rates":          false,
+		"example.com/app/internalise":         false,
+		"example.com/application/internal/x":  false,
+	} {
+		if got := filter.MatchString(path); got != want {
+			t.Errorf("%s: got %t, want %t", path, got, want)
+		}
 	}
 }
 
@@ -395,6 +451,21 @@ func parsedGoList(t *testing.T) []baseline.Package {
 func TestIODependenciesOfTheCoreAreReportedEvenIndirectly(t *testing.T) {
 	problems := baseline.DependencyProblems("example.com/app", parsedGoList(t))
 	want := "example.com/app/internal/core/rates depends on example.com/leaf, which imports net/http"
+	if len(problems) != 1 || !strings.HasPrefix(problems[0], want) {
+		t.Fatalf("got %q, want one problem starting %q", problems, want)
+	}
+}
+
+func TestIODependenciesOfAnOrchestratorAreReportedEvenIndirectly(t *testing.T) {
+	packages, err := baseline.ParsePackages([]byte(`{"ImportPath": "example.com/leaf", "Imports": ["net/http"], "Module": {"Path": "example.com/leaf"}}
+{"ImportPath": "example.com/mid", "Imports": ["example.com/leaf"], "Module": {"Path": "example.com/mid"}}
+{"ImportPath": "example.com/app/internal/orchestrators/app", "Imports": ["example.com/mid"], "Module": {"Path": "example.com/app"}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	problems := baseline.DependencyProblems("example.com/app", packages)
+	want := "example.com/app/internal/orchestrators/app depends on example.com/leaf, which imports net/http"
 	if len(problems) != 1 || !strings.HasPrefix(problems[0], want) {
 		t.Fatalf("got %q, want one problem starting %q", problems, want)
 	}

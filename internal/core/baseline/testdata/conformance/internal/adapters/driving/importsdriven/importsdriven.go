@@ -2,8 +2,8 @@
 package importsdriven
 
 import (
-	"example.com/conformance/internal/adapters/driven/clock"
+	"example.com/conformance/internal/adapters/driven/notes"
 )
 
 // Handle answers a request by reading a driven adapter itself.
-func Handle() int { return clock.System{}.Now().Year() }
+func Handle() (string, error) { return notes.Store{}.Read("note.txt") }

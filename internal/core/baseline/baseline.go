@@ -54,6 +54,12 @@ const TaskfilePath = "Taskfile.yml"
 // WorkflowPath is where every project has its CI workflow.
 const WorkflowPath = ".github/workflows/check.yml"
 
+// CacheIgnore is the .gitignore line for the directory every project's
+// tools keep their caches in.
+// COUPLED:tool-cache-dir:[=; //github.com/ianflanagan1/code-rulebook/rulebook/rules/project/tool-caches-are-ignored.yaml; //github.com/ianflanagan1/code-rulebook/docs/baselines.md;
+// //github.com/ianflanagan1/ts-baseline/src/core/findProblems.ts; //github.com/ianflanagan1/php-baseline/src/Core/ProjectProblems.php]
+const CacheIgnore = "/cache/"
+
 var (
 	exactGo      = regexp.MustCompile(`^go@(\d+\.\d+)\.\d+$`)
 	coverageLine = regexp.MustCompile(`^(?:ok|FAIL)?\s+(\S+)\s.*coverage: ([0-9.]+)% of statements`)
@@ -196,6 +202,8 @@ type Project struct {
 	// Taskfile is the project's Taskfile, at TaskfilePath.
 	Taskfile []byte
 	Devbox   []byte
+	// Gitignore is the project's .gitignore.
+	Gitignore []byte
 	// Dirs lists the project's directories, slash-separated and relative to
 	// its root.
 	Dirs []string
@@ -390,9 +398,9 @@ func Verify(p Project) ([]string, error) {
 		problems = append(problems, TaskfilePath+" differs from the baseline; run `go tool go-baseline write`, and put the project's own tasks in Taskfile.project.yml")
 	}
 	problems = append(problems, devboxProblems(p.Devbox, p.GoMod)...)
+	problems = append(problems, gitignoreProblems(p.Gitignore)...)
 	problems = append(problems, layoutProblems(p.Dirs)...)
 	problems = append(problems, RolelessProblems(module, p.Packages)...)
-	problems = append(problems, ReleaseUnitProblems(module, p.Packages)...)
 	problems = append(problems, DependencyProblems(module, p.Packages)...)
 	return problems, nil
 }
@@ -435,6 +443,21 @@ func devboxPackageProblems(packages []string) []string {
 		problems = append(problems, "devbox.json must pin go-task@"+TaskVersion+", which runs the Taskfile")
 	}
 	return problems
+}
+
+// gitignoreProblems reports a .gitignore that doesn't ignore the cache
+// directory with CacheIgnore. Git ignores trailing spaces, and the line may
+// end with a carriage return.
+func gitignoreProblems(gitignore []byte) []string {
+	if gitignore == nil {
+		return []string{".gitignore is missing; add one with the line " + CacheIgnore + ", for the directory tools keep their caches in"}
+	}
+	for line := range strings.Lines(string(gitignore)) {
+		if strings.TrimRight(line, " \r\n") == CacheIgnore {
+			return nil
+		}
+	}
+	return []string{".gitignore must have the line " + CacheIgnore + ", for the directory tools keep their caches in"}
 }
 
 // goVersionProblems reports go.mod's go line differing from the minor
@@ -484,74 +507,20 @@ func layoutProblems(dirs []string) []string {
 	return problems
 }
 
-// IsApplication reports whether the module has an entrypoint, which makes it
-// an application rather than a library. packages are from `go list -json`.
-func IsApplication(module string, packages []Package) bool {
+// HasEntrypoint reports whether the module has a program in cmd/. packages
+// are from `go list -json`.
+func HasEntrypoint(module string, packages []Package) bool {
 	return slices.ContainsFunc(sortedOwnPackages(module, packages), func(p Package) bool {
 		role, _ := RoleOf(relativeDir(module, p.ImportPath))
 		return role == Entrypoint
 	})
 }
 
-// ReleaseUnitProblems reports what would let another project depend on an
-// application, or a library's users inherit its adapters' dependencies. In
-// an application, every package but the entrypoints is under internal/, so no
-// other module can import it. In a library with any role but adapters, the
-// adapters import only the standard library and the module's own packages.
-func ReleaseUnitProblems(module string, packages []Package) []string {
-	own := sortedOwnPackages(module, packages)
-	if IsApplication(module, packages) {
-		return applicationProblems(module, own)
-	}
-	return libraryAdapterProblems(module, own)
-}
-
-func applicationProblems(module string, own []Package) []string {
-	var problems []string
-	for _, p := range own {
-		dir := relativeDir(module, p.ImportPath)
-		if role, _ := RoleOf(dir); role != Entrypoint && !slices.Contains(strings.Split(dir, "/"), "internal") {
-			problems = append(problems, fmt.Sprintf(
-				"%s: the module has a program in cmd/, so it's an application, which no other module may import; move the package under internal/",
-				p.ImportPath))
-		}
-	}
-	return problems
-}
-
-func libraryAdapterProblems(module string, own []Package) []string {
-	isAdapter := func(p Package) bool { return isAdapterPackage(module, p) }
-	if !slices.ContainsFunc(own, func(p Package) bool { return !isAdapter(p) }) {
-		return nil
-	}
-	var problems []string
-	for _, p := range own {
-		if !isAdapter(p) {
-			continue
-		}
-		for _, imported := range p.Imports {
-			if isOtherModule(module, imported) {
-				problems = append(problems, fmt.Sprintf(
-					"%s imports %s; a library with more than adapters keeps its adapters to the standard library, so its users don't inherit their dependencies: move the adapter to a library of only adapters",
-					p.ImportPath, imported))
-			}
-		}
-	}
-	return problems
-}
-
-// isAdapterPackage reports whether p, one of module's packages, is under an
-// adapters/ directory.
-func isAdapterPackage(module string, p Package) bool {
-	role, ok := RoleOf(relativeDir(module, p.ImportPath))
-	return !ok || role == DrivingAdapter || role == DrivenAdapter
-}
-
-// isOtherModule reports whether importPath is neither in the standard
-// library, whose paths have no dot in their first element, nor in module.
-func isOtherModule(module, importPath string) bool {
-	first, _, _ := strings.Cut(importPath, "/")
-	return strings.Contains(first, ".") && importPath != module && !strings.HasPrefix(importPath, module+"/")
+// DeadcodeFilter is the -filter that limits deadcode to module's packages
+// under cmd/ and internal/. Other modules may import any of its other
+// packages, so a function no program in cmd/ calls may still be in use.
+func DeadcodeFilter(module string) string {
+	return "^" + regexp.QuoteMeta(module) + "/(cmd|internal)(/|$)"
 }
 
 // DependencyProblems reports each third-party package that a core or

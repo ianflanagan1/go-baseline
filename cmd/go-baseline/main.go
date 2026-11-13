@@ -144,6 +144,9 @@ func readProject() (baseline.Project, error) {
 	if p.Devbox, err = readOptional("devbox.json"); err != nil {
 		return p, err
 	}
+	if p.Gitignore, err = readOptional(".gitignore"); err != nil {
+		return p, err
+	}
 	if p.Dirs, err = projectDirs(); err != nil {
 		return p, err
 	}
@@ -170,19 +173,19 @@ func tidyProblems() ([]string, error) {
 	return nil, nil
 }
 
-// deadcode reports the functions that no program in an application
-// reaches. A library is imported by other modules, so whatever it exports is
-// in use. It runs the deadcode in the x/tools that go-baseline requires.
+// deadcode reports the functions under cmd/ and internal/ that no program in
+// cmd/ reaches. A module without a program has nothing to reach them from. It
+// runs the deadcode in the x/tools that go-baseline requires.
 func deadcode(p baseline.Project) ([]string, error) {
 	module, err := baseline.ModulePath(p.GoMod)
 	if err != nil {
 		return nil, err
 	}
-	if !baseline.IsApplication(module, p.Packages) {
+	if !baseline.HasEntrypoint(module, p.Packages) {
 		return nil, nil
 	}
 	var stdout, stderr strings.Builder
-	cmd := exec.Command("go", "run", "golang.org/x/tools/cmd/deadcode", "./...")
+	cmd := exec.Command("go", "run", "golang.org/x/tools/cmd/deadcode", "-filter", baseline.DeadcodeFilter(module), "./...")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

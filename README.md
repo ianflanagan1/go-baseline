@@ -36,13 +36,13 @@ Publish it with `github publish` from repo-tools.
 | `go.mod`'s `go` line is the minor version of the Go that devbox pins | `go.mod` | `verify` |
 | `GOTOOLCHAIN=local` | `devbox.json` env | `verify` |
 | No scripts: every command is a task | `devbox.json` | `verify` |
+| `cache/`, where tools keep their caches, is ignored with the line `/cache/` | `.gitignore` | `verify` |
 | Values reaching the core through interfaces, functions, fields or type arguments are pure (`coreboundary`) | code | `verify` |
 | Configuration (environment, flags, `os.Args`) is read only in `cmd/` (`configread`) | code | `verify` |
 | No third-party dependency of a core or orchestrator package imports an I/O package, at any depth | `go.mod` | `verify`, from `go list -deps` |
 | `go.mod` and `go.sum` are tidy | `go.mod` | `verify`, with `go mod tidy -diff` |
 | No call reaches a function with a known vulnerability | code and `go.mod` | `verify`, with govulncheck |
-| In an application, every function is reachable from a program in `cmd/` | code | `verify`, with deadcode |
-| An application's packages, other than `cmd/`, are under `internal/`; a library's adapters import only the standard library and the library's own packages, unless it holds only adapters | directories and code | `verify`, from `go list` |
+| In a module with a program in `cmd/`, every function under `cmd/` and `internal/` is reachable from one | code | `verify`, with deadcode |
 | GitHub Actions pinned by commit SHA | `.github/workflows/check.yml` | `verify`: must match byte for byte |
 | Each core package's tests cover at least 80% of its statements | tests | `test` |
 | No data races in the tests | tests | `test`, with `-race` |
@@ -77,7 +77,7 @@ Decisions on the common Go analysis tools, recorded 28 October 2026. golangci-li
 | govulncheck | In `verify`, through `golang.org/x/vuln/scan`, so its version is pinned in go-baseline's `go.mod` |
 | modernize | golangci-lint; Go is pinned, so newer idioms are always available |
 | nilness | govet analyser, which golangci-lint leaves off by default |
-| deadcode | In `verify`, for applications only: a library's exported API is in use by other modules. U1000 can't see that an exported function is unused. It runs from the x/tools that go-baseline's `go.mod` pins |
+| deadcode | In `verify`, for modules with a program in `cmd/`, and only under `cmd/` and `internal/`: other modules may use any other package. U1000 can't see that an exported function is unused. It runs from the x/tools that go-baseline's `go.mod` pins |
 | gosec | golangci-lint. G204 and G304 are excluded in `cmd/` and adapters, and gosec in tests, in the template rather than with `//nolint` |
 
 ### Not adopted
@@ -112,6 +112,8 @@ Rules that need a project's roles or type information across packages are analyz
 
 `verify` runs every analyzer over the project, through the adapter in `internal/adapters/driven/gopackages`.
 
+An analyzer or `verify` step the baseline still needs has an entry in [docs/analyzers-and-verify-steps-to-build.md](docs/analyzers-and-verify-steps-to-build.md). When a clause needs one the baseline doesn't have, or a requirement for a planned one arrives or changes, add or change its entry in the same change, and don't build the check in that change. Build one check to a session, test-first, and delete its entry in the change that adds it.
+
 golangci-lint can't extend a shared config, so a project can't add its own rules to `.golangci.yml`. When one needs to, add the option to the baseline.
 
 ## The code rulebook
@@ -120,12 +122,14 @@ The [code rulebook](https://github.com/ianflanagan1/code-rulebook) states the ru
 
 code-rulebook is a private repository, so that test needs Git access to it. Locally, have Git fetch it over SSH: `git config --global url."git@github.com:ianflanagan1/code-rulebook".insteadOf "https://github.com/ianflanagan1/code-rulebook"`. In CI, give the job a token that can read it.
 
-`TestConformance` in `internal/core/baseline` is the proof for the linters. It runs golangci-lint, with the config `write` generates, over `testdata/conformance`, which has a package for each violation the rulebook describes. Each subtest is named for its clause. `TestGoHasNoSyntaxFor` and `TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage` prove the claims Go itself enforces.
+[docs/analyzers-and-verify-steps-to-build.md](docs/analyzers-and-verify-steps-to-build.md) lists the analyzers and `verify` steps still to build, each with the clauses it enforces, what it must report and allow, and its fixtures. Each is built alone, test-first, and its entry deleted when it is. The tests in `internal/core/rulebook/checkstobuild_test.go` fail when the list is empty, or an entry is incomplete, names a clause the listing lacks or covers in full, or names a check that exists.
+
+`TestConformance` in `internal/core/baseline` is the proof for the linters. It runs golangci-lint, with the config `write` generates, over `testdata/conformance`, which has a package for each violation the rulebook describes. Each subtest is named for its clause. `TestGoHasNoSyntaxFor`, `TestTheCompilerRejects`, `TestGoHasNoBuiltinThatRunsText`, `TestAnInterfaceWithAnUnexportedMethodIsImplementedOnlyInItsPackage` and the tests that build the other modules under `testdata` prove the claims Go itself enforces.
 
 When a check changes what it enforces, or the baseline moves to a new rulebook release:
 
 1. Bump `rulebookRelease` in `internal/core/rulebook/rulebook_test.go`, if moving.
-2. Assess each clause the test reports. Where an existing check reaches, add the violation to `testdata/conformance` and its expectation to `TestConformance`, or write another test that shows the check catching it. Where catching it needs a check go-baseline doesn't have, such as a new analyzer, record the coverage the existing checks give and write down what the missing check must do; it is built separately.
+2. Assess each clause the test reports. Where an existing check reaches, add the violation to `testdata/conformance` and its expectation to `TestConformance`, or write another test that shows the check catching it. Where catching it needs a check go-baseline doesn't have, such as a new analyzer, record the coverage the existing checks give and write down what the missing check must do; it is built separately. A missing analyzer or `verify` step gets an entry in [docs/analyzers-and-verify-steps-to-build.md](docs/analyzers-and-verify-steps-to-build.md).
 3. Update the claim in `internal/core/rulebook/rulebook.go`.
 4. `devbox run -- task rulebook-coverage`, then `check`.
 

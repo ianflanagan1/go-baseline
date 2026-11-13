@@ -17,7 +17,7 @@ const moduleRoot = "../../.."
 
 // rulebookRelease is the release of the code rulebook that the listing is
 // checked against. Moving to a new release means assessing what it changed.
-const rulebookRelease = "v0.1.0"
+const rulebookRelease = "v0.3.0"
 
 func TestTheListingFitsThePinnedRulebook(t *testing.T) {
 	cmd := exec.Command("go", "run", "github.com/ianflanagan1/code-rulebook/cmd/code-rulebook@"+rulebookRelease, "check-listing", moduleRoot)
