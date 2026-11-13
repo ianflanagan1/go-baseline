@@ -203,9 +203,10 @@ linters:
         linters:
           - forbidigo
       # Running commands and opening files by name is what adapters and
-      # entrypoints are for.
+      # entrypoints are for. G703 reports writing data read from a file as
+      # path traversal even when the path is a constant.
       - path: (^|/)(cmd|adapters)/
-        text: G204|G304
+        text: G204|G304|G703
         linters:
           - gosec
       # Adapters and entrypoints are kept thin and small; the core and
