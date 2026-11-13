@@ -35,6 +35,7 @@ Publish it with `github publish` from repo-tools.
 | Go pinned to an exact version, golangci-lint and go-task to the baseline's versions | `devbox.json` packages | `verify` |
 | `go.mod`'s `go` line is the minor version of the Go that devbox pins | `go.mod` | `verify` |
 | `GOTOOLCHAIN=local` | `devbox.json` env | `verify` |
+| [coupled-tags-lint](https://github.com/ianflanagan1/coupled-tags), which `check` runs to lint the `COUPLED:` tags | `devbox.json` packages, with the commit pinned in `devbox.lock` | `verify` |
 | No scripts: every command is a task | `devbox.json` | `verify` |
 | `cache/`, where tools keep their caches, is ignored with the line `/cache/` | `.gitignore` | `verify` |
 | Values reaching the core through interfaces, functions, fields or type arguments are pure (`coreboundary`) | code | `verify` |

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "keys": {
+    "coverage-listing-shape": [
+      {"path": "internal/core/rulebook/rulebook.go", "relation": "same-shape; //github.com/ianflanagan1/code-rulebook/schema/coverage.schema.json; //github.com/ianflanagan1/code-rulebook/internal/core/rulebook/model.go; //github.com/ianflanagan1/ts-baseline/src/core/listing.ts; //github.com/ianflanagan1/php-baseline/src/Core/RulebookListing.php", "block": "a2a7627cad9a5d6c"}
+    ],
+    "tool-cache-dir": [
+      {"path": "internal/core/baseline/baseline.go", "relation": "=; //github.com/ianflanagan1/code-rulebook/rulebook/rules/project/tool-caches-are-ignored.yaml; //github.com/ianflanagan1/code-rulebook/docs/baselines.md; //github.com/ianflanagan1/ts-baseline/src/core/findProblems.ts; //github.com/ianflanagan1/php-baseline/src/Core/ProjectProblems.php"}
+    ]
+  }
+}

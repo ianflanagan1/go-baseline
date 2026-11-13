@@ -11,11 +11,12 @@ includes:
 
 tasks:
   check:
-    desc: Verify the project against go-baseline, then lint and test it
+    desc: Verify the project against go-baseline, lint and test it, then lint its COUPLED tags
     cmds:
       - go tool go-baseline verify
       - task: lint
       - task: test
+      - coupled-tags-lint
 
   lint:
     desc: Lint, and check formatting

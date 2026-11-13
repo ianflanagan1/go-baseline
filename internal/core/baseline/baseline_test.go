@@ -14,7 +14,7 @@ import (
 const goMod = "module example.com/app\n\ngo 1.27\n"
 
 const devbox = `{
-  "packages": ["go@1.27.3", "golangci-lint@` + baseline.GolangciLintVersion + `", "go-task@` + baseline.TaskVersion + `"],
+  "packages": ["go@1.27.3", "golangci-lint@` + baseline.GolangciLintVersion + `", "go-task@` + baseline.TaskVersion + `", "` + baseline.CoupledTagsLintPackage + `"],
   "env": {"GOTOOLCHAIN": "local"}
 }`
 
@@ -237,6 +237,7 @@ func TestDevboxDriftIsReported(t *testing.T) {
 		{"another golangci-lint", "golangci-lint@" + baseline.GolangciLintVersion, "golangci-lint@2.0.0", "golangci-lint@"},
 		{"toolchain downloads allowed", `"GOTOOLCHAIN": "local"`, `"GOTOOLCHAIN": "auto"`, "GOTOOLCHAIN"},
 		{"another go-task", "go-task@" + baseline.TaskVersion, "go-task@3.0.0", "go-task@"},
+		{"no coupled-tags-lint", `, "` + baseline.CoupledTagsLintPackage + `"`, "", baseline.CoupledTagsLintPackage},
 		{"a devbox script", `"env"`, `"shell": {"scripts": {"build": "go build ./..."}}, "env"`, `script "build": move it`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -244,6 +245,12 @@ func TestDevboxDriftIsReported(t *testing.T) {
 			p.Devbox = []byte(strings.Replace(devbox, tc.from, tc.to, 1))
 			assertOneProblem(t, verify(t, p), tc.want)
 		})
+	}
+}
+
+func TestTheCheckTaskLintsTheCoupledTags(t *testing.T) {
+	if !strings.Contains(string(baseline.Taskfile()), "\n      - coupled-tags-lint\n") {
+		t.Fatal("the check task doesn't run coupled-tags-lint")
 	}
 }
 
