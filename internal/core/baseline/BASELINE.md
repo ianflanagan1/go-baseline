@@ -134,7 +134,7 @@ func (g Greeter) Greet(name string) error {
 }
 ```
 
-A driven adapter implements the port, in `internal/adapters/driven/clock`. Prefer a shared adapter from go-adapters when one fits; write your own only for I/O specific to the project:
+A driven adapter implements the port, in `internal/adapters/driven/clock`. Prefer a shared adapter from go-shared-code when one fits; write your own only for I/O specific to the project:
 
 ```go
 // Package clock adapts the system clock to the Clock port.
@@ -278,11 +278,11 @@ return orders.Show(order, found), nil
 
 Return concrete values from a port, not an interface such as a sum type: `verify` can't tell what's behind an interface the orchestrator passes to the core. A fake of the port is a map, and the adapter's integration test runs its queries against a real database.
 
-Use go-ports' `sqlmsg` with go-adapters' `sqlquery` only where the core decides the query itself, such as a search over filters the user picks: the core builds a `sqlmsg.Query` and reads the `sqlmsg.Rows` that come back.
+Use go-ports' `sqlmsg` with go-shared-code's `sqlquery` only where the core decides the query itself, such as a search over filters the user picks: the core builds a `sqlmsg.Query` and reads the `sqlmsg.Rows` that come back.
 
 ## Libraries
 
-Make a library pure, with only `core/`: it takes data and returns data, and its caller does the I/O. An API client builds requests and parses responses as `httpmsg` values from go-ports; the caller's orchestrator sends them through its own port, which `cmd/` satisfies with go-adapters' `httpsend`:
+Make a library pure, with only `core/`: it takes data and returns data, and its caller does the I/O. An API client builds requests and parses responses as `httpmsg` values from go-ports; the caller's orchestrator sends them through its own port, which `cmd/` satisfies with go-shared-code's `httpsend`:
 
 ```go
 req := rates.Latest("GBP", "USD")       // library's core builds a value
@@ -347,7 +347,7 @@ for attempt := 0; ; attempt++ {
 }
 ```
 
-Give a library orchestrators and adapters only when every caller would otherwise write the same orchestrators around its core. Its orchestrators take driven adapters through the ports they declare, and never build them or read configuration. Its adapters use only the standard library and the library's own packages, so its users don't inherit their dependencies; `verify` reports any other import. An adapter that needs a third-party module goes in a library of only adapters, such as go-adapters, which may import anything.
+Give a library orchestrators and adapters only when every caller would otherwise write the same orchestrators around its core. Its orchestrators take driven adapters through the ports they declare, and never build them or read configuration. Its adapters use only the standard library and the library's own packages, so its users don't inherit their dependencies; `verify` reports any other import. An adapter that needs a third-party module goes in a library of only adapters, such as go-shared-code, which may import anything.
 
 ## Conventions
 

@@ -4,7 +4,7 @@ import (
 	"flag"
 	"os"
 
-	"github.com/ianflanagan1/go-adapters/adapters/driven/env"
+	"github.com/ianflanagan1/go-shared-code/adapters/driven/env"
 )
 
 func Read() (string, bool) {

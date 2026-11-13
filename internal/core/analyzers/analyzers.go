@@ -15,7 +15,7 @@ import (
 
 // EnvAdapter is the shared adapter for the process environment, which only an
 // entrypoint may use.
-const EnvAdapter = "github.com/ianflanagan1/go-adapters/adapters/driven/env"
+const EnvAdapter = "github.com/ianflanagan1/go-shared-code/adapters/driven/env"
 
 // Project is what the analyzers need to know about the project under
 // analysis.

@@ -29,7 +29,7 @@ func TestConfigRead(t *testing.T) {
 
 func TestTheEnvAdapterMayReadConfiguration(t *testing.T) {
 	analysistest.Run(t, analysistest.TestData(), analyzers.ConfigRead(analyzers.Project{
-		Module: "github.com/ianflanagan1/go-adapters",
+		Module: "github.com/ianflanagan1/go-shared-code",
 	}), analyzers.EnvAdapter)
 }
 
